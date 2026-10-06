@@ -2,6 +2,51 @@
 
 Todas as mudanças importantes da NeoCOBOL serão documentadas neste arquivo.
 
+## [0.5.1] - 2026-10-06
+
+### Adicionado
+
+- Interpolação de strings com avaliação de expressões.
+- Suporte a variáveis dentro de interpolação.
+- Suporte a operações matemáticas dentro de interpolação.
+- Suporte a chamadas de funções dentro de interpolação.
+- Suporte a expressões compostas e chamadas de funções aninhadas dentro de interpolação.
+- Megatest abrangente para validação do interpretador.
+- Testes integrados de tipos, operadores, atribuições, condicionais, loops, funções, escopo e cálculos decimais.
+
+### Melhorias
+
+- Avaliação de expressões interpoladas integrada ao runtime.
+- Melhor suporte a expressões complexas em `display`.
+- Maior cobertura de testes do interpretador.
+- Maior estabilidade do runtime.
+- Validação da execução de programas completos utilizando múltiplos recursos da linguagem.
+
+### Correções
+
+- Corrigida a interpolação que anteriormente tratava chamadas de funções como texto literal.
+- Corrigida a avaliação de expressões dentro de `{}` em strings.
+- Corrigido o processamento de expressões com parênteses dentro de interpolação.
+
+### Testes
+
+A versão 0.5.1 foi validada com testes envolvendo:
+
+- Tipos `decimal`, `string` e `boolean`.
+- Operações matemáticas.
+- Comparações.
+- Atribuições compostas.
+- `if / else`.
+- `while`.
+- Funções com parâmetros.
+- `return`.
+- Escopo de variáveis.
+- Interpolação simples.
+- Interpolação com expressões.
+- Interpolação com chamadas de funções.
+- Interpolação com expressões compostas.
+- Cálculos financeiros utilizando `rust_decimal`.
+
 ## [0.5.0] - 2026-09-02
 
 ### Adicionado

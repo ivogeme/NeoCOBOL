@@ -1,0 +1,268 @@
+display "=================================================="
+display "          MEGATEST NeoCOBOL 0.5.1"
+display "=================================================="
+
+display ""
+display ">>> 1. TIPOS BASICOS"
+
+decimal inteiro = 42
+decimal decimal1 = 123.456
+string texto = "NeoCOBOL"
+boolean verdadeiro = true
+boolean falso = false
+
+display inteiro
+display decimal1
+display texto
+display verdadeiro
+display falso
+
+display ""
+display ">>> 2. ARITMETICA"
+
+decimal a = 20
+decimal b = 6
+
+display a + b
+display a - b
+display a * b
+display a / b
+display (a + b) * 2
+display a + b * 3
+display (a + b) / 2
+
+display ""
+display ">>> 3. VARIAVEIS E ATRIBUICAO"
+
+decimal contador = 10
+
+display contador
+
+contador = 20
+display contador
+
+contador += 5
+display contador
+
+contador -= 3
+display contador
+
+contador *= 2
+display contador
+
+contador /= 4
+display contador
+
+display ""
+display ">>> 4. COMPARACOES"
+
+decimal numero = 10
+
+if numero == 10
+    display "igual"
+end
+
+if numero != 20
+    display "diferente"
+end
+
+if numero < 20
+    display "menor"
+end
+
+if numero <= 10
+    display "menor ou igual"
+end
+
+if numero > 5
+    display "maior"
+end
+
+if numero >= 10
+    display "maior ou igual"
+end
+
+display ""
+display ">>> 5. IF / ELSE"
+
+decimal idade = 20
+
+if idade >= 18
+    display "maior de idade"
+else
+    display "menor de idade"
+end
+
+decimal temperatura = 10
+
+if temperatura > 30
+    display "quente"
+else
+    display "normal"
+end
+
+display ""
+display ">>> 6. WHILE"
+
+decimal i = 1
+
+while i <= 10
+    display i
+    i += 1
+end
+
+display ""
+display ">>> 7. FUNCAO SIMPLES"
+
+func dobro(valor: decimal) -> decimal
+    return valor * 2
+end
+
+display dobro(10)
+display dobro(50)
+display dobro(123.50)
+
+display ""
+display ">>> 8. FUNCAO COM VARIOS PARAMETROS"
+
+func soma(x: decimal, y: decimal) -> decimal
+    return x + y
+end
+
+func multiplicar(x: decimal, y: decimal) -> decimal
+    return x * y
+end
+
+display soma(10, 20)
+display soma(100, 250)
+display multiplicar(5, 6)
+display multiplicar(12, 10)
+
+display ""
+display ">>> 9. FUNCOES COM EXPRESSOES"
+
+display dobro(10 + 5)
+display soma(10 * 2, 5 * 4)
+display multiplicar(2 + 3, 4 + 6)
+
+display ""
+display ">>> 10. INTERPOLACAO DE VARIAVEIS"
+
+string usuario = "Ivo"
+decimal saldo = 1500.75
+
+display "Usuario: {usuario}"
+display "Saldo: {saldo}"
+
+display ""
+display ">>> 11. INTERPOLACAO DE EXPRESSOES"
+
+display "Saldo + 500: {saldo + 500}"
+display "Saldo * 2: {saldo * 2}"
+display "Calculo: {(saldo + 500) * 2}"
+
+display ""
+display ">>> 12. INTERPOLACAO DE FUNCOES"
+
+display "Dobro: {dobro(10)}"
+display "Dobro do saldo: {dobro(saldo)}"
+display "Soma: {soma(100, 200)}"
+display "Multiplicacao: {multiplicar(10, 20)}"
+
+display ""
+display ">>> 13. INTERPOLACAO COMPLEXA"
+
+display "Resultado: {dobro(soma(10, 20))}"
+display "Resultado 2: {multiplicar(soma(2, 3), dobro(5))}"
+
+display ""
+display ">>> 14. ESCOPO"
+
+decimal valor = 100
+
+func testar_escopo(numero: decimal) -> decimal
+    decimal valor = 500
+    return valor + numero
+end
+
+display "Global antes: {valor}"
+display "Resultado local: {testar_escopo(10)}"
+display "Global depois: {valor}"
+
+display ""
+display ">>> 15. DECIMAIS"
+
+decimal preco = 19.99
+decimal quantidade = 3
+decimal total = preco * quantidade
+
+display "Preco: {preco}"
+display "Quantidade: {quantidade}"
+display "Total: {total}"
+
+display ""
+display ">>> 16. CALCULO FINANCEIRO"
+
+decimal salario = 3500.00
+decimal imposto = salario * 0.10
+decimal liquido = salario - imposto
+
+display "Salario: {salario}"
+display "Imposto: {imposto}"
+display "Liquido: {liquido}"
+
+display ""
+display ">>> 17. LOOP COM CALCULO"
+
+decimal soma_total = 0
+decimal n = 1
+
+while n <= 10
+    soma_total += n
+    n += 1
+end
+
+display "Soma de 1 a 10: {soma_total}"
+
+display ""
+display ">>> 18. FUNCAO FINANCEIRA"
+
+func desconto(preco: decimal, percentual: decimal) -> decimal
+    return preco - (preco * percentual / 100)
+end
+
+display "Preco original: {1000}"
+display "Com desconto: {desconto(1000, 15)}"
+
+display ""
+display ">>> 19. EXPRESSOES COM PRECEDENCIA"
+
+display 2 + 3 * 4
+display (2 + 3) * 4
+display 100 / 5 + 10
+display 100 / (5 + 5)
+
+display ""
+display ">>> 20. TESTE INTEGRADO"
+
+decimal preco_produto = 250.75
+decimal quantidade_produto = 4
+decimal total_compra = preco_produto * quantidade_produto
+
+if total_compra >= 1000
+    display "Compra grande"
+else
+    display "Compra normal"
+end
+
+display "Produto: {usuario}"
+display "Preco: {preco_produto}"
+display "Quantidade: {quantidade_produto}"
+display "Total: {total_compra}"
+display "Total dobrado: {dobro(total_compra)}"
+display "Total com desconto: {desconto(total_compra, 10)}"
+
+display ""
+display "=================================================="
+display "       MEGATEST NeoCOBOL 0.5.1 CONCLUIDO"
+display "=================================================="

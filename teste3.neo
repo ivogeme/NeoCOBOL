@@ -16,7 +16,7 @@ while contador <= 5
     contador = contador + 1
 end
 
-func dobro(valor)
+func dobro(valor: decimal) -> decimal
     return valor + valor
 end
 

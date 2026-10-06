@@ -16,7 +16,7 @@ while x < 20
     display "contador = {x}"
 end
 
-func dobro(valor)
+func dobro(valor: decimal) -> decimal
     return valor * 2
 end
 

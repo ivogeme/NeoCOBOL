@@ -1,59 +1,111 @@
 NeoCOBOL
 
-Uma linguagem de programação simples, leve e legível.
+Uma linguagem de programação experimental inspirada na clareza e simplicidade das linguagens clássicas, desenvolvida com Rust.
 
-Versão
-
-0.5.0
+Versão atual: 0.5.1
 
 O que é?
 
-NeoCOBOL é uma linguagem experimental criada para ser:
+NeoCOBOL é uma linguagem de programação experimental criada com foco em:
 
-- Simples
-- Leve
-- Legível
-- Fortemente tipada
-- Segura
+- Simplicidade
+- Legibilidade
+- Tipagem
+- Segurança
+- Cálculos decimais precisos
+- Sintaxe clara
+- Facilidade de implementação e manutenção
 
-Atualmente, a NeoCOBOL funciona através de um interpretador escrito em Rust.
+A linguagem atualmente funciona através de um interpretador escrito em Rust.
 
-Exemplo
+O projeto não busca reproduzir o COBOL original. A proposta é explorar uma linguagem moderna com algumas ideias de legibilidade e orientação a programas administrativos presentes em linguagens clássicas.
 
-decimal numero = 10
+Estado atual
 
-numero += 5
+A versão 0.5.1 é uma versão funcional e experimental do interpretador.
 
-if numero > 10
-    display "Numero: {numero}"
-end
+O núcleo da linguagem já possui lexer, parser, AST, análise semântica e runtime próprio.
+
+A versão foi validada através de testes envolvendo os principais recursos atualmente implementados.
+
+Ainda existem recursos importantes planejados para versões futuras.
 
 Recursos
 
-- "decimal"
-- "string"
-- "boolean"
-- "if / else"
-- "while"
-- Funções
-- "return"
-- Operações matemáticas
-- Comparações
-- "and / or / not"
-- Atribuições "+= -= *= /= %="
-- Comentários com "#"
-- Interpolação de texto
-- Erros próprios da linguagem
+Tipos
 
-Como executar
+Atualmente existem:
 
-É necessário ter Rust e Cargo instalados.
+decimal
+string
+boolean
 
-cargo run -- programa.neo
+Os valores decimais utilizam "rust_decimal", permitindo cálculos adequados para aplicações que dependem de precisão decimal.
 
-Exemplo de função
+Operadores
 
-func dobro(numero)
+A linguagem possui:
+
+- "+"
+- "-"
+- "*"
+- "/"
+- "%"
+
+Também existem operadores de comparação e operadores lógicos:
+
+==
+!=
+>
+<
+>=
+<=
+
+and
+or
+not
+
+Atribuições compostas
+
++=
+-=
+*=
+/=
+%=
+
+Exemplo:
+
+decimal total = 100
+
+total += 50
+total *= 2
+
+display total
+
+Condicionais
+
+if total >= 100
+    display "Valor alto"
+else
+    display "Valor baixo"
+end
+
+Repetição
+
+A linguagem possui "while":
+
+decimal contador = 1
+
+while contador <= 5
+    display contador
+    contador += 1
+end
+
+Funções
+
+Funções podem receber parâmetros e retornar valores:
+
+func dobro(numero: decimal) -> decimal
     return numero * 2
 end
 
@@ -63,28 +115,146 @@ Resultado:
 
 20
 
-Estrutura
+Interpolação
 
-.neo
- ↓
+Strings podem utilizar valores e expressões dentro de "{}":
+
+decimal preco = 250.75
+decimal quantidade = 4
+
+display "Preço: {preco}"
+display "Total: {preco * quantidade}"
+
+Também é possível utilizar funções:
+
+func dobro(valor: decimal) -> decimal
+    return valor * 2
+end
+
+display "Resultado: {dobro(100)}"
+
+Expressões compostas também podem ser utilizadas:
+
+func soma(x: decimal, y: decimal) -> decimal
+    return x + y
+end
+
+display "Resultado: {dobro(soma(10, 20))}"
+
+Comentários
+
+Comentários utilizam "#":
+
+# Este é um comentário
+
+decimal valor = 100
+
+Arquitetura
+
+O código-fonte NeoCOBOL passa pelas seguintes etapas:
+
+Programa .neo
+     ↓
 Lexer
- ↓
+     ↓
+Tokens
+     ↓
 Parser
- ↓
+     ↓
 AST
- ↓
+     ↓
 Análise semântica
- ↓
+     ↓
 Runtime
+     ↓
+Execução
 
-Estado
+A implementação do interpretador é escrita em Rust.
 
-Experimental.
+Sistema de erros
 
-A linguagem ainda está em desenvolvimento.
+A linguagem possui um sistema próprio de erros, incluindo códigos "NEO".
 
-Próximos objetivos incluem melhorar o sistema de tipos, análise semântica, entrada de dados, biblioteca padrão e, futuramente, compilação nativa.
+Exemplo:
+
+erro[NEO2002]: variável não encontrada
+
+Os erros procuram indicar a posição do problema e fornecer uma mensagem específica para facilitar a identificação da causa.
+
+Como executar
+
+É necessário ter Rust e Cargo instalados.
+
+Clone o projeto e entre no diretório:
+
+git clone <https://github.com/ivogeme/NeoCOBOL>
+cd NeoCOBOL
+
+Execute um programa:
+
+cargo run -- programa.neo
+
+Por exemplo:
+
+cargo run -- MEGATEST_FINAL_0.5.1.neo
+
+Testes
+
+O projeto contém programas ".neo" utilizados para testar diferentes partes da linguagem.
+
+Entre eles:
+
+teste.neo
+teste3.neo
+teste5.neo
+teste_completo_0.5.1.neo
+megatest_0.5.1.neo
+MEGATEST_FINAL_0.5.1.neo
+
+O "MEGATEST_FINAL_0.5.1.neo" reúne os principais recursos atualmente implementados e foi utilizado para validar a versão 0.5.1.
+
+Limitações atuais
+
+A NeoCOBOL ainda está em desenvolvimento.
+
+Entre as limitações atuais estão:
+
+- Não existe compilador para código nativo.
+- Ainda não existe biblioteca padrão.
+- Arrays e estruturas de dados complexas ainda não estão implementados.
+- Recursos de entrada e saída além do sistema atual ainda são limitados.
+- Acesso direto a arquivos e hardware ainda não faz parte do runtime.
+- O sistema de tipos e a análise semântica ainda podem ser ampliados.
+- O projeto ainda não possui a estabilidade de uma linguagem de produção.
+
+Próximos objetivos
+
+O desenvolvimento futuro poderá incluir:
+
+- Sistema de tipos mais completo.
+- Melhorias na análise semântica.
+- Arrays e estruturas de dados.
+- Biblioteca padrão.
+- Operações com arquivos.
+- Entrada de dados.
+- Sistema de módulos.
+- Ferramentas de linha de comando.
+- Testes automatizados mais abrangentes.
+- Melhor interoperabilidade com Rust.
+- Futuramente, compilação ou geração de código nativo.
+
+Filosofia
+
+NeoCOBOL procura explorar uma ideia simples:
+
+«Uma linguagem não precisa ser enorme para ser útil.»
+
+O projeto prioriza uma sintaxe compreensível, uma implementação relativamente pequena e recursos que possam ser entendidos sem depender de uma grande quantidade de infraestrutura.
+
+A linguagem ainda é experimental, mas seu desenvolvimento busca construir uma base que possa evoluir gradualmente sem perder essa característica.
 
 Licença
 
-Veja o arquivo "LICENSE".
+NeoCOBOL é distribuído sob a licença Apache License 2.0.
+
+Consulte o arquivo "LICENSE" para obter o texto completo da licença.

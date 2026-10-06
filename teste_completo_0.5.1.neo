@@ -1,0 +1,117 @@
+display "========================================"
+display "     TESTE COMPLETO DO NeoCOBOL 0.5.1"
+display "========================================"
+
+display ""
+display "=== 1. VALORES E VARIAVEIS ==="
+
+decimal saldo = 1234.50
+string nome = "Ivo"
+boolean ativo = true
+
+display nome
+display saldo
+display ativo
+
+display ""
+display "=== 2. OPERACOES MATEMATICAS ==="
+
+decimal a = 10
+decimal b = 3
+
+display a + b
+display a - b
+display a * b
+display a / b
+display (a + b) * 2
+
+display ""
+display "=== 3. COMPARACOES E BOOLEANOS ==="
+
+decimal idade = 18
+
+if idade >= 18
+    display "maior"
+else
+    display "menor"
+end
+
+if idade == 18
+    display "igual"
+end
+
+display ""
+display "=== 4. WHILE ==="
+
+decimal contador = 1
+
+while contador <= 5
+    display contador
+    contador += 1
+end
+
+display ""
+display "=== 5. FUNCOES ==="
+
+func dobro(valor: decimal) -> decimal
+    return valor * 2
+end
+
+display dobro(10)
+display dobro(25)
+
+display ""
+display "=== 6. FUNCAO COM VARIOS PARAMETROS ==="
+
+func soma(x: decimal, y: decimal) -> decimal
+    return x + y
+end
+
+display soma(10, 20)
+display soma(100, 50)
+
+display ""
+display "=== 7. INTERPOLACAO ==="
+
+display "Saldo: {saldo}"
+display "Dobro do saldo: {dobro(saldo)}"
+display "Calculo: {saldo + 500}"
+display "Funcao: {dobro(10 + 5)}"
+
+display ""
+display "=== 8. ESCOPO ==="
+
+decimal valor = 100
+
+func alterar(x: decimal) -> decimal
+    decimal valor = 500
+    return valor + x
+end
+
+display valor
+display alterar(10)
+display valor
+
+display ""
+display "=== 9. TESTE INTEGRADO ==="
+
+decimal preco = 250.75
+decimal quantidade = 4
+decimal total = preco * quantidade
+
+display "Produto: {nome}"
+display "Preco: {preco}"
+display "Quantidade: {quantidade}"
+display "Total: {total}"
+display "Total dobrado: {dobro(total)}"
+
+if total >= 1000
+    display "Compra de valor alto."
+else
+    display "Compra de valor normal."
+end
+
+display ""
+display "========================================"
+display "       TODOS OS TESTES FINALIZADOS"
+display "========================================"

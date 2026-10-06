@@ -1,0 +1,125 @@
+display "=========================================="
+display "       MEGATEST FINAL NeoCOBOL 0.5.1"
+display "=========================================="
+
+decimal a = 10
+decimal b = 5
+decimal saldo = 1500.50
+string nome = "NeoCOBOL"
+boolean ativo = true
+
+display "TIPOS:"
+display a
+display saldo
+display nome
+display ativo
+
+display "ARITMETICA:"
+display a + b
+display a - b
+display a * b
+display a / b
+display (a + b) * 2
+display a + b * 3
+
+display "ATRIBUICAO:"
+a += 10
+a -= 5
+a *= 2
+a /= 3
+display a
+
+display "CONDICIONAIS:"
+if saldo >= 1000
+    display "saldo alto"
+else
+    display "saldo baixo"
+end
+
+if ativo == true
+    display "ativo"
+end
+
+display "LOOP:"
+decimal contador = 1
+
+while contador <= 5
+    display contador
+    contador += 1
+end
+
+display "FUNCOES:"
+
+func dobro(valor: decimal) -> decimal
+    return valor * 2
+end
+
+func soma(x: decimal, y: decimal) -> decimal
+    return x + y
+end
+
+func multiplicar(x: decimal, y: decimal) -> decimal
+    return x * y
+end
+
+display dobro(10)
+display soma(10, 20)
+display multiplicar(5, 6)
+
+display "INTERPOLACAO:"
+display "Nome: {nome}"
+display "Saldo: {saldo}"
+display "Dobro: {dobro(saldo)}"
+display "Soma: {saldo + 500}"
+display "Calculo: {(saldo + 500) * 2}"
+display "Composto: {dobro(soma(10, 20))}"
+display "Composto 2: {multiplicar(soma(2, 3), dobro(5))}"
+
+display "ESCOPO:"
+
+decimal valor = 100
+
+func testar_escopo(x: decimal) -> decimal
+    decimal valor = 500
+    return valor + x
+end
+
+display valor
+display testar_escopo(10)
+display valor
+
+display "CALCULO FINANCEIRO:"
+
+decimal preco = 250.75
+decimal quantidade = 4
+decimal total = preco * quantidade
+
+display "Preco: {preco}"
+display "Quantidade: {quantidade}"
+display "Total: {total}"
+
+if total >= 1000
+    display "compra grande"
+else
+    display "compra normal"
+end
+
+display "DESCONTO:"
+
+func desconto(preco: decimal, percentual: decimal) -> decimal
+    return preco - (preco * percentual / 100)
+end
+
+display desconto(1000, 15)
+display "Desconto: {desconto(total, 10)}"
+
+display "INTEGRACAO FINAL:"
+display "Cliente: {nome}"
+display "Valor original: {total}"
+display "Valor dobrado: {dobro(total)}"
+display "Valor com desconto: {desconto(total, 10)}"
+display "Calculo final: {dobro(desconto(total, 10))}"
+
+display "=========================================="
+display "       MEGATEST FINAL CONCLUIDO"
+display "=========================================="
