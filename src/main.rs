@@ -6,12 +6,19 @@ use std::fs;
 use std::str::FromStr;
 
 // ================================================================
-// NeoCOBOL 0.5.1
+// NeoCOBOL 0.5.1.1
 //
-// Foco desta versão:
+// Foco desta versão (correções; quebra compatibilidade com a 0.5.1):
+// - escopo do runtime: funções só enxergam parâmetros, locais e globais
+// - `not` vale sobre a comparação inteira
+// - global usada antes de declarar agora é erro
+// - escapes em textos: \" \\ \n \t
+// - interpolação calculada ao criar o texto, com análise semântica
+// - chamada de função como instrução
+//
+// Herdado da 0.5.1:
 // - funções com parâmetros tipados e retorno tipado
 // - análise semântica completa dos corpos das funções
-// - escopo lexical: funções só enxergam parâmetros e globais
 // - limite de profundidade de chamadas
 // - linha + coluna em tokens, AST e erros
 // - true/false separados do tipo boolean
@@ -259,6 +266,20 @@ fn lex(codigo: &str) -> Result<Vec<Token>, NeoErro> {
 
                 while i < chars.len() {
                     let ch = chars[i];
+                    if ch == '\\' && i + 1 < chars.len() {
+                        let traduzido = match chars[i + 1] {
+                            '"' => Some('"'),
+                            '\\' => Some('\\'),
+                            'n' => Some('\n'),
+                            't' => Some('\t'),
+                            _ => None,
+                        };
+                        if let Some(c) = traduzido {
+                            texto.push(c);
+                            i += 2;
+                            continue;
+                        }
+                    }
                     if ch == '"' {
                         fechou = true;
                         i += 1;
@@ -509,7 +530,14 @@ struct Expr {
 }
 
 #[derive(Debug, Clone)]
+enum ParteTexto {
+    Literal(String),
+    Valor(Expr),
+}
+
+#[derive(Debug, Clone)]
 enum Expressao {
+    Interpolada(Vec<ParteTexto>),
     Decimal(Decimal),
     String(String),
     Boolean(bool),
@@ -578,6 +606,10 @@ enum Instrucao {
         bloco: Vec<Instrucao>,
         pos: Posicao,
     },
+    Expressao {
+        valor: Expr,
+        pos: Posicao,
+    },
     Return {
         valor: Option<Expr>,
         pos: Posicao,
@@ -600,7 +632,8 @@ impl Instrucao {
             | Instrucao::If { pos, .. }
             | Instrucao::While { pos, .. }
             | Instrucao::Funcao { pos, .. }
-            | Instrucao::Return { pos, .. } => *pos,
+            | Instrucao::Return { pos, .. }
+            | Instrucao::Expressao { pos, .. } => *pos,
         }
     }
 }
@@ -686,7 +719,15 @@ impl Parser {
             TokenKind::While => self.while_instrucao(),
             TokenKind::Func => self.funcao(),
             TokenKind::Return => self.retorno(),
-            TokenKind::Identificador => self.atribuicao(),
+            TokenKind::Identificador => {
+                let proximo = self.tokens.get(self.atual + 1).map(|t| t.kind.clone());
+                if proximo == Some(TokenKind::AbrePar) {
+                    let valor = self.primario()?;
+                    Ok(Instrucao::Expressao { valor, pos: token.pos })
+                } else {
+                    self.atribuicao()
+                }
+            }
             _ => Err(NeoErro::Sintaxe {
                 pos: token.pos,
                 mensagem: format!(
@@ -889,11 +930,24 @@ impl Parser {
         Ok(esquerda)
     }
 
+    fn nao(&mut self) -> Result<Expr, NeoErro> {
+        let token = self.token_atual_seguro();
+        if token.kind == TokenKind::Not {
+            self.avancar();
+            let valor = self.nao()?;
+            return Ok(Expr {
+                kind: Expressao::Not(Box::new(valor)),
+                pos: token.pos,
+            });
+        }
+        self.comparacao()
+    }
+
     fn and(&mut self) -> Result<Expr, NeoErro> {
-        let mut esquerda = self.comparacao()?;
+        let mut esquerda = self.nao()?;
         while self.token_atual_seguro().kind == TokenKind::And {
             self.avancar();
-            let direita = self.comparacao()?;
+            let direita = self.nao()?;
             let pos = esquerda.pos;
             esquerda = Expr {
                 kind: Expressao::And(Box::new(esquerda), Box::new(direita)),
@@ -1016,7 +1070,7 @@ impl Parser {
             TokenKind::Texto => {
                 self.avancar();
                 Ok(Expr {
-                    kind: Expressao::String(token.texto),
+                    kind: dividir_interpolacao(&token.texto, token.pos)?,
                     pos: token.pos,
                 })
             }
@@ -1071,6 +1125,96 @@ impl Parser {
             }),
         }
     }
+}
+
+fn erro_interpolacao(trecho: &str, pos: Posicao, erro: &NeoErro) -> NeoErro {
+    let detalhe = match erro {
+        NeoErro::Lexico { mensagem, .. }
+        | NeoErro::Sintaxe { mensagem, .. }
+        | NeoErro::Semantico { mensagem, .. }
+        | NeoErro::Runtime { mensagem, .. } => mensagem.clone(),
+        NeoErro::Tipo { contexto, .. } => contexto.clone(),
+    };
+    NeoErro::Sintaxe {
+        pos,
+        mensagem: format!("Interpolação inválida em '{{{}}}': {}", trecho, detalhe),
+    }
+}
+
+fn dividir_interpolacao(texto: &str, pos: Posicao) -> Result<Expressao, NeoErro> {
+    let c: Vec<char> = texto.chars().collect();
+    let mut partes: Vec<ParteTexto> = Vec::new();
+    let mut literal = String::new();
+    let mut i = 0usize;
+    let mut tem_valor = false;
+
+    while i < c.len() {
+        if c[i] != '{' {
+            literal.push(c[i]);
+            i += 1;
+            continue;
+        }
+
+        let inicio = i + 1;
+        let mut j = inicio;
+        let mut profundidade = 0usize;
+        let mut achou = false;
+        while j < c.len() {
+            if c[j] == '(' {
+                profundidade += 1;
+            } else if c[j] == ')' {
+                profundidade = profundidade.saturating_sub(1);
+            } else if c[j] == '}' && profundidade == 0 {
+                achou = true;
+                break;
+            }
+            j += 1;
+        }
+
+        if !achou {
+            literal.push('{');
+            i += 1;
+            continue;
+        }
+
+        let trecho: String = c[inicio..j].iter().collect();
+        let corte = trecho.trim();
+        if corte.is_empty() {
+            literal.push_str("{}");
+            i = j + 1;
+            continue;
+        }
+
+        let esquerda = trecho.chars().take_while(|ch| ch.is_whitespace()).count();
+        let deslocamento = inicio + esquerda;
+        let mut tokens = lex(corte).map_err(|e| erro_interpolacao(corte, pos, &e))?;
+        for token in tokens.iter_mut() {
+            token.pos = Posicao::nova(pos.linha, pos.coluna + deslocamento + token.pos.coluna);
+        }
+        let mut parser = Parser::novo(tokens);
+        let valor = parser.expressao()?;
+        if parser.token_atual_seguro().kind != TokenKind::Fim {
+            return Err(NeoErro::Sintaxe {
+                pos,
+                mensagem: format!("Expressão inválida dentro da interpolação: '{}'.", corte),
+            });
+        }
+
+        if !literal.is_empty() {
+            partes.push(ParteTexto::Literal(std::mem::take(&mut literal)));
+        }
+        partes.push(ParteTexto::Valor(valor));
+        tem_valor = true;
+        i = j + 1;
+    }
+
+    if !tem_valor {
+        return Ok(Expressao::String(literal));
+    }
+    if !literal.is_empty() {
+        partes.push(ParteTexto::Literal(literal));
+    }
+    Ok(Expressao::Interpolada(partes))
 }
 
 fn nome_token(kind: &TokenKind) -> &'static str {
@@ -1155,6 +1299,7 @@ struct AnalisadorSemantico {
     funcoes: HashMap<String, AssinaturaFuncao>,
     funcao_atual: Option<String>,
     retorno_atual: Option<Tipo>,
+    globais_declaradas: std::collections::HashSet<String>,
 }
 
 impl AnalisadorSemantico {
@@ -1165,6 +1310,7 @@ impl AnalisadorSemantico {
             funcoes: HashMap::new(),
             funcao_atual: None,
             retorno_atual: None,
+            globais_declaradas: std::collections::HashSet::new(),
         }
     }
 
@@ -1357,13 +1503,16 @@ impl AnalisadorSemantico {
                     );
                 }
                 // No nível global, o símbolo já foi registrado no primeiro passe.
+                if self.funcao_atual.is_none() && self.escopos_locais.is_empty() {
+                    self.globais_declaradas.insert(nome.clone());
+                }
 
             }
             Instrucao::Atribuir { nome, operador, valor, pos } => {
                 let tipo_variavel = self.buscar_variavel(nome).ok_or_else(|| NeoErro::Semantico {
                     pos: *pos,
                     mensagem: format!(
-                        "A variável '{}' não existe neste escopo. Declare-a antes de usá-la.",
+                        "A variável '{}' não foi declarada. Declare-a antes de usá-la.",
                         nome
                     ),
                 })?;
@@ -1412,6 +1561,9 @@ impl AnalisadorSemantico {
                         }
                     }
                 }
+            }
+            Instrucao::Expressao { valor, .. } => {
+                self.expressao(valor)?;
             }
             Instrucao::Display { valor, .. } => {
                 self.expressao(valor)?;
@@ -1508,13 +1660,29 @@ impl AnalisadorSemantico {
 
     fn expressao(&self, expr: &Expr) -> Result<Tipo, NeoErro> {
         match &expr.kind {
+            Expressao::Interpolada(partes) => {
+                for parte in partes {
+                    if let ParteTexto::Valor(e) = parte {
+                        let tipo = self.expressao(e)?;
+                        if tipo == Tipo::Vazio {
+                            return Err(NeoErro::Tipo {
+                                pos: e.pos,
+                                esperado: "decimal, string ou boolean".into(),
+                                recebido: "vazio".into(),
+                                contexto: "Uma função 'vazio' não produz valor para a interpolação.".into(),
+                            });
+                        }
+                    }
+                }
+                Ok(Tipo::String)
+            }
             Expressao::Decimal(_) => Ok(Tipo::Decimal),
             Expressao::String(_) => Ok(Tipo::String),
             Expressao::Boolean(_) => Ok(Tipo::Boolean),
             Expressao::Variavel(nome) => self.buscar_variavel(nome).ok_or_else(|| NeoErro::Semantico {
                 pos: expr.pos,
                 mensagem: format!(
-                    "A variável '{}' não existe neste escopo. Funções não podem acessar variáveis locais de quem as chamou.",
+                    "A variável '{}' não foi declarada. Declare-a antes de usá-la. Dentro de funções, só estão disponíveis os parâmetros, as variáveis da própria função e as globais.",
                     nome
                 ),
             }),
@@ -1663,6 +1831,9 @@ impl AnalisadorSemantico {
                 return Some(simbolo.tipo.clone());
             }
         }
+        if self.funcao_atual.is_none() && !self.globais_declaradas.contains(nome) {
+            return None;
+        }
         self.globais.get(nome).map(|s| s.tipo.clone())
     }
 
@@ -1784,7 +1955,7 @@ impl Runtime {
             }
             Instrucao::Display { valor, pos } => {
                 let resultado = self.avaliar(valor, *pos)?;
-                let texto = self.interpolar(&resultado.texto(), *pos)?;
+                let texto = resultado.texto();
                 println!("{}", texto);
             }
             Instrucao::If { condicao, verdadeiro, falso, pos } => {
@@ -1830,6 +2001,9 @@ impl Runtime {
                 }
             },
             Instrucao::Funcao { .. } => {}
+            Instrucao::Expressao { valor, pos } => {
+                self.avaliar(valor, *pos)?;
+            }
             Instrucao::Return { valor, pos } => {
                 if self.locais.is_empty() {
                     return Err(NeoErro::Semantico {
@@ -1869,6 +2043,19 @@ impl Runtime {
     fn avaliar(&mut self, expr: &Expr, pos_fallback: Posicao) -> Result<NeoValor, NeoErro> {
         let pos = expr.pos;
         match &expr.kind {
+            Expressao::Interpolada(partes) => {
+                let mut resultado = String::new();
+                for parte in partes {
+                    match parte {
+                        ParteTexto::Literal(texto) => resultado.push_str(texto),
+                        ParteTexto::Valor(e) => {
+                            let valor = self.avaliar(e, pos_fallback)?;
+                            resultado.push_str(&valor.texto());
+                        }
+                    }
+                }
+                Ok(NeoValor::String(resultado))
+            }
             Expressao::Decimal(v) => Ok(NeoValor::Decimal(*v)),
             Expressao::String(v) => Ok(NeoValor::String(v.clone())),
             Expressao::Boolean(v) => Ok(NeoValor::Boolean(*v)),
@@ -2133,12 +2320,14 @@ impl Runtime {
         }
 
         self.profundidade_funcoes += 1;
+        let locais_do_chamador = std::mem::take(&mut self.locais);
         self.locais.push(novo_escopo);
 
         let resultado = self.executar_corpo_funcao(&funcao.bloco, pos);
 
         let _ = self.locais.pop();
         self.profundidade_funcoes = self.profundidade_funcoes.saturating_sub(1);
+        self.locais = locais_do_chamador;
 
         let valor = resultado?;
         if valor.tipo() != funcao.retorno {
@@ -2296,82 +2485,6 @@ impl Runtime {
         }
         None
     }
-
-    fn interpolar(
-        &mut self,
-        texto: &str,
-        pos: Posicao,
-    ) -> Result<String, NeoErro> {
-        let caracteres: Vec<char> = texto.chars().collect();
-
-        let mut resultado = String::new();
-        let mut indice = 0;
-
-        while indice < caracteres.len() {
-            if caracteres[indice] != '{' {
-                resultado.push(caracteres[indice]);
-                indice += 1;
-                continue;
-            }
-
-            indice += 1;
-
-            let mut expressao = String::new();
-            let mut profundidade = 0;
-
-            while indice < caracteres.len() {
-                let caractere = caracteres[indice];
-
-                if caractere == '(' {
-                    profundidade += 1;
-                } else if caractere == ')' {
-                    if profundidade > 0 {
-                        profundidade -= 1;
-                    }
-                } else if caractere == '}' && profundidade == 0 {
-                    break;
-                }
-
-                expressao.push(caractere);
-                indice += 1;
-            }
-
-            if indice >= caracteres.len() {
-                resultado.push('{');
-                resultado.push_str(&expressao);
-                break;
-            }
-
-            indice += 1;
-
-            let expressao = expressao.trim();
-
-            if expressao.is_empty() {
-                resultado.push_str("{}");
-                continue;
-            }
-
-            let tokens = lex(expressao)?;
-
-            let mut parser = Parser::novo(tokens);
-            let arvore = parser.expressao()?;
-
-            if parser.token_atual_seguro().kind != TokenKind::Fim {
-                return Err(NeoErro::Sintaxe {
-                    pos,
-                    mensagem: format!(
-                        "Expressão inválida dentro da interpolação: '{}'.",
-                        expressao
-                    ),
-                });
-            }
-
-            let valor = self.avaliar(&arvore, pos)?;
-            resultado.push_str(&valor.texto());
-        }
-
-        Ok(resultado)
-    }
 }
 
 // ================================================================
@@ -2397,7 +2510,7 @@ fn executar_arquivo(caminho: &str) -> Result<(), NeoErro> {
         mensagem: format!("Não foi possível abrir '{}': {}", caminho, erro),
     })?;
 
-    println!("NeoCOBOL 0.5.1");
+    println!("NeoCOBOL 0.5.1.1");
     println!("Compilando: {}", caminho);
 
     let tokens = lex(&codigo)?;
@@ -2421,7 +2534,7 @@ fn main() {
     let argumentos: Vec<String> = env::args().collect();
 
     if argumentos.len() < 2 {
-        println!("NeoCOBOL 0.5.1");
+        println!("NeoCOBOL 0.5.1.1");
         println!("Uso:");
         println!("  cargo run -- programa.neo");
         return;
@@ -2464,8 +2577,8 @@ mod testes {
         let tokens = lex("boolean ativo = true\ndisplay false").expect("lexer deve funcionar");
         assert_eq!(tokens[0].kind, TokenKind::BooleanTipo);
         assert_eq!(tokens[3].kind, TokenKind::Verdadeiro);
-        assert_eq!(tokens[5].kind, TokenKind::Display);
-        assert_eq!(tokens[6].kind, TokenKind::Falso);
+        assert_eq!(tokens[4].kind, TokenKind::Display);
+        assert_eq!(tokens[5].kind, TokenKind::Falso);
     }
 
     #[test]
@@ -2687,7 +2800,7 @@ boolean x = true or (10 / 0 > 1)
         let erro = lex("display \"abc").expect_err("deve falhar");
         assert_eq!(erro.codigo(), CodigoErro::Lexico);
         assert_eq!(erro.posicao().linha, 1);
-        assert_eq!(erro.posicao().coluna, 8);
+        assert_eq!(erro.posicao().coluna, 9);
     }
 
     #[test]
@@ -2732,6 +2845,14 @@ boolean x = true or (10 / 0 > 1)
 
     #[test]
     fn recursao_e_limitada() {
+        let t = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(recursao_e_limitada_corpo)
+            .expect("nao foi possivel criar a thread");
+        t.join().expect("o teste da recursao falhou");
+    }
+
+    fn recursao_e_limitada_corpo() {
         let codigo = r#"
 func loop(x: decimal) -> decimal
     return loop(x + 1)
@@ -2792,6 +2913,97 @@ end
     }
 
     #[test]
+    fn funcao_nao_enxerga_local_do_chamador_no_runtime() {
+        let codigo = r#"
+decimal x = 10
+func f() -> decimal
+    return x
+end
+decimal r = 0
+if true
+    decimal x = 99
+    r = f()
+end
+"#;
+        let tokens = lex(codigo).expect("lexer");
+        let mut parser = Parser::novo(tokens);
+        let programa = parser.analisar().expect("parser");
+        let mut sem = AnalisadorSemantico::novo();
+        sem.analisar(&programa).expect("semantica");
+        let mut runtime = Runtime::novo();
+        runtime.executar(&programa).expect("runtime");
+        assert_eq!(
+            runtime.globais.get("r"),
+            Some(&NeoValor::Decimal(Decimal::from(10)))
+        );
+    }
+
+    #[test]
+    fn global_usada_antes_de_declarar_e_rejeitada() {
+        let erro = analisar("display total\ndecimal total = 10").expect_err("deve falhar");
+        assert_eq!(erro.codigo(), CodigoErro::Semantico);
+    }
+
+    #[test]
+    fn aspas_escapadas_em_string() {
+        let tokens = lex(r#"display "a\"b""#).expect("lexer");
+        assert_eq!(tokens[1].texto, "a\"b");
+    }
+
+    #[test]
+    fn interpolacao_calcula_expressoes() {
+        let g = globais_apos(
+            r#"
+decimal x = 2
+string s = "valor {x + 1}!"
+"#,
+        );
+        assert_eq!(g.get("s"), Some(&NeoValor::String("valor 3!".to_string())));
+    }
+
+    #[test]
+    fn interpolacao_com_variavel_inexistente_e_rejeitada() {
+        let erro = analisar(
+            r#"
+string s = "{inexistente}"
+"#,
+        )
+        .expect_err("deve falhar");
+        assert_eq!(erro.codigo(), CodigoErro::Semantico);
+    }
+
+    #[test]
+    fn erro_dentro_da_interpolacao_aponta_a_linha_certa() {
+        let erro = analisar(
+            r#"
+decimal a = 1
+string s = "x {a +}"
+"#,
+        )
+        .expect_err("deve falhar");
+        assert_eq!(erro.codigo(), CodigoErro::Sintaxe);
+        assert_eq!(erro.posicao().linha, 3);
+    }
+
+    fn globais_apos(codigo: &str) -> std::collections::HashMap<String, NeoValor> {
+        let tokens = lex(codigo).expect("lexer");
+        let mut parser = Parser::novo(tokens);
+        let programa = parser.analisar().expect("parser");
+        let mut sem = AnalisadorSemantico::novo();
+        sem.analisar(&programa).expect("semantica");
+        let mut runtime = Runtime::novo();
+        runtime.executar(&programa).expect("runtime");
+        runtime.globais
+    }
+
+    #[test]
+    fn variavel_nao_declarada_tem_mensagem_clara() {
+        let erro = analisar("display total").expect_err("deve falhar");
+        assert_eq!(erro.codigo(), CodigoErro::Semantico);
+        assert!(erro.to_string().contains("não foi declarada"));
+    }
+
+    #[test]
     fn escopos_de_blocos_nao_vazam() {
         let codigo = r#"
 if true
@@ -2801,5 +3013,9 @@ display interno
 "#;
         assert!(analisar(codigo).is_err());
     }
+
+}
+
+}
 
 }
