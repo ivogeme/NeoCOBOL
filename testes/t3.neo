@@ -1,0 +1,4 @@
+func loop(x: decimal) -> decimal
+    return loop(x + 1)
+end
+decimal r = loop(0)

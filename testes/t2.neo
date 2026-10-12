@@ -1,0 +1,8 @@
+func mostrar(nome: string) -> vazio
+    display nome
+end
+mostrar("Neo")
+decimal v = 3
+if not v > 5
+    display "ok"
+end

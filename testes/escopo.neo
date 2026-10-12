@@ -1,0 +1,8 @@
+decimal x = 10
+func f() -> decimal
+    return x
+end
+if true
+    decimal x = 99
+    display f()
+end
