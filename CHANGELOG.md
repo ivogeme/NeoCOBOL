@@ -1,6 +1,52 @@
 # Changelog
 
 Todas as mudanças importantes da NeoCOBOL serão documentadas neste arquivo.
+## [0.5.1.1] - 2026-10-11
+
+Versão focada em correções, fora do plano original.
+
+**Esta versão quebra compatibilidade com a 0.5.1.**
+
+### Alterado (quebra compatibilidade)
+
+- Funções agora enxergam apenas seus parâmetros, suas variáveis locais e as variáveis globais. Antes, no runtime, também enxergavam as variáveis locais de quem as chamava.
+- O operador `not` passou a valer sobre a comparação inteira: `not x > 5` agora equivale a `not (x > 5)`. Antes equivalia a `(not x) > 5`.
+- No código principal, usar uma variável global antes de declará-la agora é erro semântico. As funções continuam enxergando todas as globais.
+- Em textos, `\"`, `\\`, `\n` e `\t` passaram a ter significado (aspas, barra invertida, quebra de linha e tabulação).
+- A interpolação `{expressão}` agora é calculada quando o texto é criado, e não no `display`. Textos que vêm de variáveis ou de funções não são mais reinterpretados.
+
+### Adicionado
+
+- Chamada de função como instrução, por exemplo `mostrar("Neo")`. Antes isso gerava erro de sintaxe.
+- Análise semântica das expressões dentro de `{}`: variável inexistente ou erro de tipo na interpolação agora são detectados antes da execução.
+- Erro de tipo ao interpolar uma chamada de função `vazio`.
+
+### Melhorias
+
+- - Erros dentro de `{}` agora informam a linha correta do arquivo (antes apontavam sempre para a linha 1). A coluna é aproximada quando o texto tem escapes, e erros léxicos dentro do `{}` apontam para o início do texto.).
+- Mensagem de variável não declarada reescrita, para ser clara tanto dentro de funções quanto no código principal.
+- A versão exibida pelo programa é 0.5.1.1.
+
+### Correções
+
+- Corrigido o runtime, em que uma função podia ler ou alterar variáveis locais de quem a chamava.
+- Corrigidos três testes unitários que falhavam (dois com valores errados e um que dependia da chamada de função como instrução).
+- Corrigido o estouro de pilha do teste de recursão, que passa a rodar numa thread com pilha maior.
+- Removida a função antiga que reinterpretava textos durante o `display`.
+
+### Testes
+
+- 42 testes unitários (`cargo test`), contra 35 na 0.5.1.
+- Novos testes: escopo no runtime, global usada antes de declarar, aspas escapadas, cálculo de interpolação, interpolação com variável inexistente, posição do erro dentro da interpolação e mensagem de variável não declarada.
+- O megatest continua executando até o fim com sucesso.
+
+### Limitações conhecidas
+
+- Ainda não existe forma de escrever `{x}` literal em um texto.
+- Dentro de `{}`, aspas precisam de barra invertida, por exemplo `{f(\"a\")}`.
+- Só existe a repetição `while`, e não há `else if`.
+- O programa ainda mostra linhas de diagnóstico antes do resultado.
+- Continuam sem existir biblioteca padrão, arrays, registros, entrada de dados e acesso a arquivos.
 
 ## [0.5.1] - 2026-10-06
 
