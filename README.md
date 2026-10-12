@@ -1,88 +1,68 @@
-NeoCOBOL
+# NeoCOBOL
 
-Uma linguagem de programação experimental inspirada na clareza e simplicidade das linguagens clássicas, desenvolvida com Rust.
+Uma linguagem de programação experimental, inspirada na clareza do COBOL, feita do zero em Rust.
 
-Versão atual: 0.5.1
+**Versão atual: 0.5.1.1.** Esta versão corrige falhas da 0.5.1 e **quebra compatibilidade** com ela. Veja o [CHANGELOG](CHANGELOG.md).
 
-O que é?
+## O que é
 
-NeoCOBOL é uma linguagem de programação experimental criada com foco em:
+O NeoCOBOL foi pensado para ser simples de ler e de aprender:
 
-- Simplicidade
-- Legibilidade
-- Tipagem
-- Segurança
-- Cálculos decimais precisos
-- Sintaxe clara
-- Facilidade de implementação e manutenção
+- Sintaxe pequena e clara
+- Tipos explícitos, sem conversão automática
+- Cálculos decimais exatos (`decimal`, usando `rust_decimal`)
+- Erros com código, linha, coluna e mensagem em português
 
-A linguagem atualmente funciona através de um interpretador escrito em Rust.
+Hoje a linguagem funciona por meio de um interpretador escrito em Rust, que roda inclusive no celular (Termux/Android). O projeto não busca reproduzir o COBOL original: a proposta é explorar uma linguagem moderna que preserve as ideias de legibilidade e de programas administrativos das linguagens clássicas.
 
-O projeto não busca reproduzir o COBOL original. A proposta é explorar uma linguagem moderna com algumas ideias de legibilidade e orientação a programas administrativos presentes em linguagens clássicas.
+## Início rápido
 
-Estado atual
+É preciso ter Rust e Cargo instalados.
 
-A versão 0.5.1 é uma versão funcional e experimental do interpretador.
+~~~
+git clone https://github.com/ivogeme/NeoCOBOL
+cd NeoCOBOL
+~~~
 
-O núcleo da linguagem já possui lexer, parser, AST, análise semântica e runtime próprio.
+Crie um arquivo `ola.neo`:
 
-A versão foi validada através de testes envolvendo os principais recursos atualmente implementados.
+~~~
+display "Olá, mundo"
+~~~
 
-Ainda existem recursos importantes planejados para versões futuras.
+E execute:
 
-Recursos
+~~~
+cargo run -- ola.neo
+~~~
 
-Tipos
+O programa mostra algumas linhas de diagnóstico (Lexer, Parser, Semântica) antes do resultado.
 
-Atualmente existem:
+## A linguagem
 
-decimal
-string
-boolean
+### Variáveis e tipos
 
-Os valores decimais utilizam "rust_decimal", permitindo cálculos adequados para aplicações que dependem de precisão decimal.
+~~~
+decimal preco = 19.90
+string nome = "Ana"
+boolean ativo = true
+~~~
 
-Operadores
+Toda variável é declarada com tipo e valor inicial. Os tipos são `decimal`, `string` e `boolean`. O `vazio` é usado como tipo de retorno de funções que não devolvem valor. Não há conversão automática: `decimal x = "10"` é um erro. Comentários começam com `#`.
 
-A linguagem possui:
+### Operadores
 
-- "+"
-- "-"
-- "*"
-- "/"
-- "%"
+- Aritméticos: `+ - * / %` (o `+` também junta strings)
+- Comparação: `== != > < >= <=`
+- Lógicos: `and or not`
+- Atribuição composta: `+= -= *= /= %=`
 
-Também existem operadores de comparação e operadores lógicos:
+O `not` vale sobre a comparação inteira: `not x > 5` é o mesmo que `not (x > 5)`. O `and` e o `or` não calculam o lado direito quando o resultado já está decidido.
 
-==
-!=
->
-<
->=
-<=
+### Condicionais e repetição
 
-and
-or
-not
-
-Atribuições compostas
-
-+=
--=
-*=
-/=
-%=
-
-Exemplo:
-
+~~~
 decimal total = 100
-
-total += 50
-total *= 2
-
-display total
-
-Condicionais
 
 if total >= 100
     display "Valor alto"
@@ -90,171 +70,138 @@ else
     display "Valor baixo"
 end
 
-Repetição
-
-A linguagem possui "while":
-
 decimal contador = 1
-
 while contador <= 5
     display contador
     contador += 1
 end
+~~~
 
-Funções
+As condições precisam ser `boolean`.
 
-Funções podem receber parâmetros e retornar valores:
+### Funções
 
+~~~
 func dobro(numero: decimal) -> decimal
     return numero * 2
 end
 
+func saudar(nome: string) -> vazio
+    display "Olá, {nome}!"
+end
+
 display dobro(10)
+saudar("Ana")
+~~~
 
-Resultado:
+- Parâmetros e retorno são tipados.
+- Uma função enxerga apenas seus parâmetros, suas variáveis locais e as variáveis globais, nunca as variáveis locais de quem a chamou.
+- Uma função com retorno precisa devolver valor em todos os caminhos.
+- Funções só podem ser definidas no nível principal do programa.
+- A recursão é limitada a 256 chamadas.
 
-20
+### Texto e interpolação
 
-Interpolação
-
-Strings podem utilizar valores e expressões dentro de "{}":
-
+~~~
 decimal preco = 250.75
 decimal quantidade = 4
-
-display "Preço: {preco}"
 display "Total: {preco * quantidade}"
+display "Ela disse \"oi\""
+~~~
 
-Também é possível utilizar funções:
+- O `{expressão}` é calculado quando o texto é criado e verificado antes da execução. Pode conter chamadas de função.
+- Escapes disponíveis: `\"`, `\\`, `\n` e `\t`.
+- `{}` vazio e `{` sem fechamento ficam como texto. Ainda não existe forma de escrever um `{x}` literal.
 
-func dobro(valor: decimal) -> decimal
-    return valor * 2
-end
+### Erros
 
-display "Resultado: {dobro(100)}"
+Cada erro informa código, posição e mensagem:
 
-Expressões compostas também podem ser utilizadas:
+~~~
+NEO2002 - Erro semântico na linha 1, coluna 9: A variável 'total' não foi declarada. Declare-a antes de usá-la. ...
+~~~
 
-func soma(x: decimal, y: decimal) -> decimal
-    return x + y
-end
+| Código | Tipo |
+| --- | --- |
+| NEO1001 | Erro léxico |
+| NEO1002 | Erro de sintaxe |
+| NEO2001 | Erro de tipo |
+| NEO2002 | Erro semântico |
+| NEO3001 | Erro de execução |
 
-display "Resultado: {dobro(soma(10, 20))}"
+## Arquitetura
 
-Comentários
-
-Comentários utilizam "#":
-
-# Este é um comentário
-
-decimal valor = 100
-
-Arquitetura
-
-O código-fonte NeoCOBOL passa pelas seguintes etapas:
-
+~~~
 Programa .neo
      ↓
-Lexer
+Lexer → Tokens
      ↓
-Tokens
-     ↓
-Parser
-     ↓
-AST
+Parser → AST
      ↓
 Análise semântica
      ↓
-Runtime
-     ↓
-Execução
+Runtime → Execução
+~~~
 
-A implementação do interpretador é escrita em Rust.
+## Testes
 
-Sistema de erros
+- `cargo test` roda 42 testes unitários (lexer, parser, semântica e runtime).
+- Os programas `.neo` do repositório (`teste.neo`, `teste3.neo`, `teste5.neo`, `teste_completo_0.5.1.neo`, `megatest_0.5.1.neo` e `MEGATEST_FINAL_0.5.1.neo`) exercitam os recursos da linguagem. Rode-os e confira a saída.
 
-A linguagem possui um sistema próprio de erros, incluindo códigos "NEO".
+## Mudanças da 0.5.1.1 (quebram compatibilidade)
 
-Exemplo:
+- Funções não enxergam mais variáveis locais de quem as chamou.
+- `not` vale sobre a comparação inteira.
+- Variável global usada antes de ser declarada agora é erro.
+- `\"`, `\\`, `\n` e `\t` em textos passam a ter significado.
+- A interpolação é calculada ao criar o texto, e não no `display`.
 
-erro[NEO2002]: variável não encontrada
+Detalhes no [CHANGELOG](CHANGELOG.md).
 
-Os erros procuram indicar a posição do problema e fornecer uma mensagem específica para facilitar a identificação da causa.
+## Limitações atuais
 
-Como executar
+- Não há biblioteca padrão, arrays nem registros.
+- Não há entrada de dados pelo teclado nem leitura de arquivos.
+- Só existe um tipo numérico (`decimal`).
+- Só existe a repetição `while`, e não há `else if`.
+- Não há módulos nem compilação para código nativo.
+- Não existe forma de escrever um `{x}` literal em um texto.
+- O programa sempre mostra linhas de diagnóstico antes do resultado.
+- O projeto ainda não tem a estabilidade de uma linguagem de produção.
 
-É necessário ter Rust e Cargo instalados.
+## Próximos objetivos
 
-Clone o projeto e entre no diretório:
+Sem ordem fixa, e podem mudar:
 
-git clone <https://github.com/ivogeme/NeoCOBOL>
-cd NeoCOBOL
+- Definir o idioma das palavras da linguagem
+- Arredondamento e formatação de decimais e moeda
+- Registros (dados organizados em campos)
+- Entrada de dados e arquivos
+- Arrays, `else if` e `for`
+- Saída limpa por padrão
+- Biblioteca padrão e módulos
+- Ferramenta de linha de comando e testes automáticos mais abrangentes
 
-Execute um programa:
+## Filosofia
 
-cargo run -- programa.neo
+O NeoCOBOL nasceu de uma observação: a ideia por trás do COBOL era muito boa, mas a linguagem envelheceu. Em vez de tentar reproduzi-la, este projeto a refaz do zero, como uma linguagem nova, mantendo a filosofia original e usando tecnologia moderna.
 
-Por exemplo:
+**O que o COBOL acertou e o NeoCOBOL quer preservar**
 
-cargo run -- MEGATEST_FINAL_0.5.1.neo
+- **Legibilidade.** Um programa deve poder ser lido quase como um texto, inclusive por quem não é programador.
+- **Dinheiro exato.** Cálculos decimais não podem esconder erros de arredondamento.
+- **Dados organizados.** Informações de negócio (clientes, pedidos, notas) devem ser fáceis de representar e processar. *(planejado)*
 
-Testes
+**O que o NeoCOBOL faz de diferente**
 
-O projeto contém programas ".neo" utilizados para testar diferentes partes da linguagem.
+- **Simples para quem está começando.** Sintaxe pequena, tipos explícitos e erros com código, linha, coluna e mensagem clara.
+- **Tecnologia moderna.** Interpretador escrito em Rust, que já roda no celular (Termux).
+- **Pequena de propósito.**
 
-Entre eles:
+> Uma linguagem não precisa ser enorme para ser útil.
 
-teste.neo
-teste3.neo
-teste5.neo
-teste_completo_0.5.1.neo
-megatest_0.5.1.neo
-MEGATEST_FINAL_0.5.1.neo
+O projeto é experimental. As versões 0.x podem quebrar compatibilidade, e cada quebra é registrada no [CHANGELOG](CHANGELOG.md).
 
-O "MEGATEST_FINAL_0.5.1.neo" reúne os principais recursos atualmente implementados e foi utilizado para validar a versão 0.5.1.
+## Licença
 
-Limitações atuais
-
-A NeoCOBOL ainda está em desenvolvimento.
-
-Entre as limitações atuais estão:
-
-- Não existe compilador para código nativo.
-- Ainda não existe biblioteca padrão.
-- Arrays e estruturas de dados complexas ainda não estão implementados.
-- Recursos de entrada e saída além do sistema atual ainda são limitados.
-- Acesso direto a arquivos e hardware ainda não faz parte do runtime.
-- O sistema de tipos e a análise semântica ainda podem ser ampliados.
-- O projeto ainda não possui a estabilidade de uma linguagem de produção.
-
-Próximos objetivos
-
-O desenvolvimento futuro poderá incluir:
-
-- Sistema de tipos mais completo.
-- Melhorias na análise semântica.
-- Arrays e estruturas de dados.
-- Biblioteca padrão.
-- Operações com arquivos.
-- Entrada de dados.
-- Sistema de módulos.
-- Ferramentas de linha de comando.
-- Testes automatizados mais abrangentes.
-- Melhor interoperabilidade com Rust.
-- Futuramente, compilação ou geração de código nativo.
-
-Filosofia
-
-NeoCOBOL procura explorar uma ideia simples:
-
-«Uma linguagem não precisa ser enorme para ser útil.»
-
-O projeto prioriza uma sintaxe compreensível, uma implementação relativamente pequena e recursos que possam ser entendidos sem depender de uma grande quantidade de infraestrutura.
-
-A linguagem ainda é experimental, mas seu desenvolvimento busca construir uma base que possa evoluir gradualmente sem perder essa característica.
-
-Licença
-
-NeoCOBOL é distribuído sob a licença Apache License 2.0.
-
-Consulte o arquivo "LICENSE" para obter o texto completo da licença.
+NeoCOBOL é distribuído sob a licença Apache License 2.0. Consulte o arquivo [LICENSE](LICENSE).
