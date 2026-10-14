@@ -47,7 +47,7 @@ Objetivo: tornar a NeoCOBOL mais fácil de depurar, mais robusta e mais amigáve
 - Saída estruturada em JSON, preparando a integração com ferramentas de IDE.
 - Sugestões do tipo "você quis dizer...?" para nomes parecidos.
 
-## Próximas versões (ordem proposta)
+## 0.6.2
 
 1. Definir o idioma das palavras da linguagem.
 2. Arredondamento e formatação de decimais e moeda.
