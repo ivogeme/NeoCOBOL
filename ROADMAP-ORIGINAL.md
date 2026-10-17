@@ -1,3 +1,6 @@
+
+Este documento preserva o roteiro original da NeoCOBOL. Para consultar os planos atuais, veja ROADMAP.md.
+
 0.3 → núcleo funcional
 0.4 → funções e escopos
 0.5 → biblioteca padrão
