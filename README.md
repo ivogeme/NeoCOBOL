@@ -227,7 +227,7 @@ cargo build
 
 A suíte cobre análise léxica, sintaxe, tipos, escopos, funções, interpolação, diagnósticos, tratamento de entradas inválidas, limites de profundidade, interface de linha de comando e execução de exemplos.
 
-Na última execução local informada durante a preparação desta documentação, **76 testes passaram**: 63 unitários, 12 de CLI e 1 de exemplos. A quantidade pode mudar com novas alterações no repositório.
+Na última execução local informada durante a preparação desta documentação, **77 testes passaram**: 63 unitários, 12 de CLI e 1 de exemplos. A quantidade pode mudar com novas alterações no repositório.
 
 A pasta `testes/` contém programas `.neo` e arquivos de referência `.saida` e `.erro`. Os programas cujo nome começa com `erro_` devem encerrar com código de saída `1`.
 
