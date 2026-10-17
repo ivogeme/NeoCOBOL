@@ -1,6 +1,52 @@
 # Changelog
 
 Todas as mudanças importantes da NeoCOBOL serão documentadas neste arquivo.
+## [0.6.0] - 2026-10-17
+
+Foco: diagnósticos. Esta versão muda a saída do programa e os códigos de erro e **quebra compatibilidade com a 0.5.1.1**.
+
+### Alterado (quebra compatibilidade)
+
+- A saída agora é limpa por padrão: o programa mostra só o resultado ou o erro. As linhas "NeoCOBOL", "Compilando", "Lexer", "Parser", "Semântica" e "Programa executado com sucesso." só aparecem com `--detalhes`.
+- Cada tipo de erro passou a ter o seu código (de NEO1001 a NEO3010). Os cinco códigos antigos mudaram de significado: NEO1001 era "erro léxico" e agora é "caractere desconhecido"; NEO1002 era "erro de sintaxe" e agora é "string não terminada"; NEO2001 era "erro de tipo" e agora é "tipos incompatíveis"; NEO2002 era "erro semântico" e agora é "tipo incompatível em declaração ou atribuição"; NEO3001 era "erro de execução" e agora é "divisão por zero".
+- O formato do erro mudou: código, arquivo, linha e coluna, trecho do código com indicador que cobre o trecho inteiro do erro, esperado e recebido (nos erros de tipo) e ajuda. Os erros vão para a saída de erros. A tabela completa está em [ERROS.md](ERROS.md).
+- Novos limites, que geram o erro NEO1107: cerca de 50 níveis de parênteses ou de chamadas aninhadas, cerca de 150 blocos, `not` ou `-` seguidos, e 1000 operadores em uma única instrução.
+- O executável passou a se chamar `neocobol`.
+
+### Adicionado
+
+- Comando `check`: `neocobol check programa.neo` verifica o programa sem executá-lo.
+- Opções `--detalhes`, `--versao` (`-v`) e `--ajuda` (`-h`). O `--detalhes` e o `check` podem vir em qualquer ordem.
+- Códigos de saída: 0 (sucesso), 1 (erro no programa) e 2 (opção inválida).
+- Novos códigos de erro: NEO1107 (aninhamento ou tamanho excessivo), NEO1108, NEO2108 e NEO3010 (falhas internas).
+
+### Melhorias
+
+- O erro agora guarda o início e o fim do trecho, e o indicador `^` cobre o trecho inteiro.
+- Em erros de operação, o indicador aponta para o operador (`+`, `/`, `and`...). Em declaração, atribuição e condição, aponta para o valor ou a condição. Em função ou variável duplicada, aponta para o nome. Erros no fim do arquivo aparecem na última linha.
+- A mensagem de declaração duplicada informa a linha da primeira declaração.
+- O interpretador roda numa thread com pilha de 256 MB, para que recursão e programas profundos não estourem a pilha.
+- Entradas inválidas não causaram panic nos testes: eles cobrem milhares de entradas geradas (cada programa de exemplo cortado, com um caractere removido ou trocado, e sequências aleatórias de tokens).
+- Cada erro já nasce com o seu código. Um erro criado sem código não compila.
+
+### Testes
+
+- 64 testes unitários (eram 42), 12 testes do executável de verdade (`tests/cli.rs`) e o teste dos programas completos (`tests/exemplos.rs`).
+- Cada código de erro que dá para provocar a partir do código-fonte tem um teste que confere título, posição, mensagem, trecho, indicador e ajuda, e o teste falha se um código novo for criado sem teste. O NEO3009 é testado na linha de comando. O NEO2108 e o NEO3010 são defesas internas e não têm teste.
+- Pasta `testes/` com 11 programas `.neo`: para cada `nome.neo`, `nome.saida` guarda a saída esperada e `nome.erro` guarda os erros esperados. Os programas `erro_*` devem terminar com código de saída 1.
+
+### Interno
+
+- Tipos de erro, tabela de códigos e formatação em `src/diagnostico.rs`. Linha de comando em `src/cli.rs`.
+- Zero avisos do compilador.
+
+### Limitações conhecidas
+
+- Só o primeiro erro de cada programa é mostrado.
+- Ainda não há avisos (NEO4xxx), saída em JSON nem sugestões do tipo "você quis dizer".
+- As limitações da 0.5.1.1 continuam.
+
+
 ## [0.5.1.1] - 2026-10-11
 
 Versão focada em correções, fora do plano original.
