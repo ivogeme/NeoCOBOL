@@ -1,0 +1,7 @@
+erro[NEO3001]: Divisão por zero
+ --> testes/erro_divisao_por_zero.neo:1:16
+  |
+1 | decimal x = 10 / 0
+  |                ^
+  = Divisão por zero não é permitida.
+  = ajuda: Confira se o divisor pode ser zero antes de dividir.

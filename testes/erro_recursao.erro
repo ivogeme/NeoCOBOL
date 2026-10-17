@@ -1,0 +1,7 @@
+erro[NEO3004]: Limite de chamadas excedido
+ --> testes/erro_recursao.neo:2:12
+  |
+2 |     return loop(x + 1)
+  |            ^^^^
+  = profundidade máxima de chamadas de função excedida. A função 'loop' atingiu o limite de 256 chamadas aninhadas. Isso normalmente indica uma recursão sem condição de parada.
+  = ajuda: Isso costuma indicar uma recursão sem condição de parada.

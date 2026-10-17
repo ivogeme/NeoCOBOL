@@ -1,0 +1,7 @@
+erro[NEO1103]: Elemento esperado ausente
+ --> testes/erro_sintaxe.neo:1:8
+  |
+1 | if true
+  |        ^
+  = Esperado end, mas encontrado ''.
+  = ajuda: Confira se não falta algo, como ')' ou 'end'.

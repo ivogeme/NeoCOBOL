@@ -1,0 +1,1 @@
+decimal x = 1 + "a"

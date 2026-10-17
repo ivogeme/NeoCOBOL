@@ -1,0 +1,6 @@
+decimal v = 3
+if not v > 5
+    display "ok"
+end
+boolean b = not (v == 3) or v < 10
+display b

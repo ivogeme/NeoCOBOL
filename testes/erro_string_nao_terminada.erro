@@ -1,0 +1,7 @@
+erro[NEO1002]: String não terminada
+ --> testes/erro_string_nao_terminada.neo:1:9
+  |
+1 | display "abc
+  |         ^^^^
+  = String não terminada. A string começou na coluna 9 e deveria terminar com '"'.
+  = ajuda: Feche o texto com aspas duplas.

@@ -1,0 +1,9 @@
+erro[NEO2001]: Tipos incompatíveis
+ --> testes/erro_tipo.neo:1:15
+  |
+1 | decimal x = 1 + "a"
+  |               ^
+  = esperado: decimal + decimal ou string + string
+  = recebido: decimal + string
+  = Não há conversão implícita entre os tipos.
+  = ajuda: Os dois lados da operação precisam ter tipos compatíveis. Não há conversão automática.

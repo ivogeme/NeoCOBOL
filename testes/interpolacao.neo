@@ -1,0 +1,7 @@
+decimal preco = 10.50
+decimal qtd = 3
+string msg = "Total: {preco * qtd} reais"
+display msg
+display "Dobro: {preco * 2}"
+display "Ela disse \"oi\""
+display "Linha1\nLinha2"

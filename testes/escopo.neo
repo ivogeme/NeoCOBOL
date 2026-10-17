@@ -5,4 +5,5 @@ end
 if true
     decimal x = 99
     display f()
+    display x
 end

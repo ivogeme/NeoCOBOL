@@ -1,0 +1,7 @@
+erro[NEO2101]: Variável não declarada
+ --> testes/erro_variavel_nao_declarada.neo:2:9
+  |
+2 | display total
+  |         ^^^^^
+  = A variável 'total' não foi declarada. Declare-a antes de usá-la. Dentro de funções, só estão disponíveis os parâmetros, as variáveis da própria função e as globais.
+  = ajuda: Declare a variável antes de usá-la, por exemplo: decimal nome = 0

@@ -1,0 +1,17 @@
+decimal preco = 19.90
+decimal qtd = 3
+decimal total = preco * qtd
+display total
+string nome = "Ana"
+boolean ativo = true
+display nome + "!"
+if ativo and total > 50
+    display "alto"
+else
+    display "baixo"
+end
+decimal i = 1
+while i <= 3
+    display i
+    i += 1
+end

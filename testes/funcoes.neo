@@ -1,0 +1,17 @@
+func dobro(n: decimal) -> decimal
+    return n * 2
+end
+func saudar(nome: string) -> vazio
+    display "Olá, {nome}!"
+end
+func sinal(x: decimal) -> string
+    if x > 0
+        return "positivo"
+    else
+        return "nao positivo"
+    end
+end
+display dobro(21)
+saudar("Neo")
+display sinal(5)
+display sinal(0)
