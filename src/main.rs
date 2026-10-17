@@ -1,14 +1,21 @@
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::env;
-use std::fmt;
-use std::fs;
 use std::str::FromStr;
 
+mod cli;
+mod diagnostico;
+use diagnostico::{NeoErro, Posicao};
+
 // ================================================================
-// NeoCOBOL 0.5.1.1
+// NeoCOBOL 0.6.0
 //
-// Foco desta versão (correções; quebra compatibilidade com a 0.5.1):
+// Foco desta versão: diagnósticos.
+// - código de erro por tipo de erro (NEO1xxx a NEO3xxx)
+// - trecho do código com indicador da posição e dica de correção
+// - comando check e saída limpa por padrão (--detalhes mostra as etapas)
+//
+// Da 0.5.1.1 (correções; quebra compatibilidade com a 0.5.1):
 // - escopo do runtime: funções só enxergam parâmetros, locais e globais
 // - `not` vale sobre a comparação inteira
 // - global usada antes de declarar agora é erro
@@ -28,18 +35,8 @@ use std::str::FromStr;
 // ================================================================
 
 const MAX_PROFUNDIDADE_FUNCAO: usize = 256;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Posicao {
-    linha: usize,
-    coluna: usize,
-}
-
-impl Posicao {
-    fn nova(linha: usize, coluna: usize) -> Self {
-        Self { linha, coluna }
-    }
-}
+const MAX_PROFUNDIDADE_PARSER: usize = 150;
+const MAX_OPERADORES_POR_INSTRUCAO: usize = 1000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Tipo {
@@ -84,88 +81,6 @@ impl NeoValor {
             NeoValor::String(v) => v.clone(),
             NeoValor::Boolean(v) => v.to_string(),
             NeoValor::Vazio => String::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum CodigoErro {
-    Lexico,
-    Sintaxe,
-    Tipo,
-    Semantico,
-    Runtime,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum NeoErro {
-    Lexico { pos: Posicao, mensagem: String },
-    Sintaxe { pos: Posicao, mensagem: String },
-    Tipo {
-        pos: Posicao,
-        esperado: String,
-        recebido: String,
-        contexto: String,
-    },
-    Semantico { pos: Posicao, mensagem: String },
-    Runtime { pos: Posicao, mensagem: String },
-}
-
-impl NeoErro {
-    fn codigo(&self) -> CodigoErro {
-        match self {
-            NeoErro::Lexico { .. } => CodigoErro::Lexico,
-            NeoErro::Sintaxe { .. } => CodigoErro::Sintaxe,
-            NeoErro::Tipo { .. } => CodigoErro::Tipo,
-            NeoErro::Semantico { .. } => CodigoErro::Semantico,
-            NeoErro::Runtime { .. } => CodigoErro::Runtime,
-        }
-    }
-
-    fn posicao(&self) -> Posicao {
-        match self {
-            NeoErro::Lexico { pos, .. }
-            | NeoErro::Sintaxe { pos, .. }
-            | NeoErro::Tipo { pos, .. }
-            | NeoErro::Semantico { pos, .. }
-            | NeoErro::Runtime { pos, .. } => *pos,
-        }
-    }
-}
-
-impl fmt::Display for NeoErro {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            NeoErro::Lexico { pos, mensagem } => write!(
-                f,
-                "NEO1001 - Erro léxico na linha {}, coluna {}: {}",
-                pos.linha, pos.coluna, mensagem
-            ),
-            NeoErro::Sintaxe { pos, mensagem } => write!(
-                f,
-                "NEO1002 - Erro de sintaxe na linha {}, coluna {}: {}",
-                pos.linha, pos.coluna, mensagem
-            ),
-            NeoErro::Tipo {
-                pos,
-                esperado,
-                recebido,
-                contexto,
-            } => write!(
-                f,
-                "NEO2001 - Erro de tipo na linha {}, coluna {}: esperado {}, recebido {}. {}",
-                pos.linha, pos.coluna, esperado, recebido, contexto
-            ),
-            NeoErro::Semantico { pos, mensagem } => write!(
-                f,
-                "NEO2002 - Erro semântico na linha {}, coluna {}: {}",
-                pos.linha, pos.coluna, mensagem
-            ),
-            NeoErro::Runtime { pos, mensagem } => write!(
-                f,
-                "NEO3001 - Erro de execução na linha {}, coluna {}: {}",
-                pos.linha, pos.coluna, mensagem
-            ),
         }
     }
 }
@@ -291,7 +206,8 @@ fn lex(codigo: &str) -> Result<Vec<Token>, NeoErro> {
 
                 if !fechou {
                     return Err(NeoErro::Lexico {
-                        pos,
+                        pos: pos.ate(chars.len() + 1),
+                        codigo: "NEO1002",
                         mensagem: format!(
                             "String não terminada. A string começou na coluna {} e deveria terminar com '\"'.",
                             coluna
@@ -307,7 +223,7 @@ fn lex(codigo: &str) -> Result<Vec<Token>, NeoErro> {
                 tokens.push(Token {
                     kind: TokenKind::Texto,
                     texto,
-                    pos,
+                    pos: pos.ate(i + 1),
                 });
                 continue;
             }
@@ -324,8 +240,11 @@ fn lex(codigo: &str) -> Result<Vec<Token>, NeoErro> {
                         pontos += 1;
                         if pontos > 1 {
                             return Err(NeoErro::Lexico {
-                                pos: Posicao::nova(linha_numero, i + 1),
-                                mensagem: "Número possui mais de um ponto decimal. Exemplo válido: 12.50.".into(),
+                                pos: Posicao::nova(linha_numero, i + 1).ate(i + 2),
+                                codigo: "NEO1003",
+                                mensagem:
+                                    "Número possui mais de um ponto decimal. Exemplo válido: 12.50."
+                                        .into(),
                             });
                         }
                         i += 1;
@@ -337,14 +256,16 @@ fn lex(codigo: &str) -> Result<Vec<Token>, NeoErro> {
                 let texto: String = chars[inicio..i].iter().collect();
                 if texto == "." {
                     return Err(NeoErro::Lexico {
-                        pos,
+                        pos: pos.ate(i + 1),
+                        codigo: "NEO1003",
                         mensagem: "Número decimal inválido.".into(),
                     });
                 }
 
                 if Decimal::from_str(&texto).is_err() {
                     return Err(NeoErro::Lexico {
-                        pos,
+                        pos: pos.ate(i + 1),
+                        codigo: "NEO1003",
                         mensagem: format!("Número decimal inválido: '{}'.", texto),
                     });
                 }
@@ -352,7 +273,7 @@ fn lex(codigo: &str) -> Result<Vec<Token>, NeoErro> {
                 tokens.push(Token {
                     kind: TokenKind::Numero,
                     texto,
-                    pos,
+                    pos: pos.ate(i + 1),
                 });
                 continue;
             }
@@ -393,7 +314,7 @@ fn lex(codigo: &str) -> Result<Vec<Token>, NeoErro> {
                 tokens.push(Token {
                     kind,
                     texto: palavra,
-                    pos,
+                    pos: pos.ate(i + 1),
                 });
                 continue;
             }
@@ -459,7 +380,8 @@ fn lex(codigo: &str) -> Result<Vec<Token>, NeoErro> {
                         consumo = 2;
                     } else {
                         return Err(NeoErro::Lexico {
-                            pos,
+                            pos: pos.ate(coluna + 1),
+                            codigo: "NEO1004",
                             mensagem: "Caractere '!' isolado. Use '!=' para diferença.".into(),
                         });
                     }
@@ -491,19 +413,20 @@ fn lex(codigo: &str) -> Result<Vec<Token>, NeoErro> {
                 tokens.push(Token {
                     kind,
                     texto: texto.into(),
-                    pos,
+                    pos: pos.ate(coluna + consumo),
                 });
                 i += consumo;
             } else {
                 return Err(NeoErro::Lexico {
-                    pos,
+                    pos: pos.ate(coluna + 1),
+                    codigo: "NEO1001",
                     mensagem: format!("Caractere desconhecido '{}'.", c),
                 });
             }
         }
     }
 
-    let ultima_linha = codigo.lines().count().max(1) + 1;
+    let ultima_linha = codigo.lines().count().max(1);
     let ultima_coluna = codigo
         .lines()
         .last()
@@ -645,11 +568,18 @@ impl Instrucao {
 struct Parser {
     tokens: Vec<Token>,
     atual: usize,
+    profundidade: usize,
+    operadores: usize,
 }
 
 impl Parser {
     fn novo(tokens: Vec<Token>) -> Self {
-        Self { tokens, atual: 0 }
+        Self {
+            tokens,
+            atual: 0,
+            profundidade: 0,
+            operadores: 0,
+        }
     }
 
     fn atual(&self) -> Option<&Token> {
@@ -680,6 +610,7 @@ impl Parser {
         } else {
             Err(NeoErro::Sintaxe {
                 pos: token.pos,
+                codigo: "NEO1103",
                 mensagem: format!(
                     "Esperado {}, mas encontrado '{}'.",
                     nome_token(&esperado),
@@ -693,7 +624,9 @@ impl Parser {
         if self.tokens.is_empty() {
             return Err(NeoErro::Sintaxe {
                 pos: Posicao::nova(1, 1),
-                mensagem: "Fluxo de tokens vazio. Era esperado pelo menos o marcador de fim.".into(),
+                codigo: "NEO1108",
+                mensagem: "Fluxo de tokens vazio. Era esperado pelo menos o marcador de fim."
+                    .into(),
             });
         }
 
@@ -709,11 +642,19 @@ impl Parser {
     }
 
     fn instrucao(&mut self) -> Result<Instrucao, NeoErro> {
+        self.entrar_nivel()?;
+        self.operadores = 0;
+        let resultado = self.instrucao_interno();
+        self.sair_nivel();
+        resultado
+    }
+
+    fn instrucao_interno(&mut self) -> Result<Instrucao, NeoErro> {
         let token = self.token_atual_seguro();
         match token.kind {
-            TokenKind::DecimalTipo
-            | TokenKind::StringTipo
-            | TokenKind::BooleanTipo => self.declaracao(),
+            TokenKind::DecimalTipo | TokenKind::StringTipo | TokenKind::BooleanTipo => {
+                self.declaracao()
+            }
             TokenKind::Display => self.display(),
             TokenKind::If => self.if_instrucao(),
             TokenKind::While => self.while_instrucao(),
@@ -723,13 +664,17 @@ impl Parser {
                 let proximo = self.tokens.get(self.atual + 1).map(|t| t.kind.clone());
                 if proximo == Some(TokenKind::AbrePar) {
                     let valor = self.primario()?;
-                    Ok(Instrucao::Expressao { valor, pos: token.pos })
+                    Ok(Instrucao::Expressao {
+                        valor,
+                        pos: token.pos,
+                    })
                 } else {
                     self.atribuicao()
                 }
             }
             _ => Err(NeoErro::Sintaxe {
                 pos: token.pos,
+                codigo: "NEO1101",
                 mensagem: format!(
                     "Instrução inesperada '{}'. Esperado início de declaração, atribuição, display, if, while, func ou return.",
                     token.texto
@@ -747,8 +692,9 @@ impl Parser {
             _ => {
                 return Err(NeoErro::Sintaxe {
                     pos: token.pos,
+                    codigo: "NEO1104",
                     mensagem: "Tipo inválido em declaração.".into(),
-                })
+                });
             }
         };
         self.avancar();
@@ -761,7 +707,7 @@ impl Parser {
             tipo,
             nome: nome.texto,
             valor,
-            pos: token.pos,
+            pos: nome.pos,
         })
     }
 
@@ -779,7 +725,9 @@ impl Parser {
                 let t = self.token_atual_seguro();
                 return Err(NeoErro::Sintaxe {
                     pos: t.pos,
-                    mensagem: "Esperado '=', '+=', '-=', '*=', '/=' ou '%=' após o identificador.".into(),
+                    codigo: "NEO1105",
+                    mensagem: "Esperado '=', '+=', '-=', '*=', '/=' ou '%=' após o identificador."
+                        .into(),
                 });
             }
         };
@@ -796,7 +744,10 @@ impl Parser {
     fn display(&mut self) -> Result<Instrucao, NeoErro> {
         let token = self.consumir(TokenKind::Display)?;
         let valor = self.expressao()?;
-        Ok(Instrucao::Display { valor, pos: token.pos })
+        Ok(Instrucao::Display {
+            valor,
+            pos: token.pos,
+        })
     }
 
     fn if_instrucao(&mut self) -> Result<Instrucao, NeoErro> {
@@ -843,7 +794,7 @@ impl Parser {
     }
 
     fn funcao(&mut self) -> Result<Instrucao, NeoErro> {
-        let inicio = self.consumir(TokenKind::Func)?;
+        self.consumir(TokenKind::Func)?;
         let nome = self.consumir(TokenKind::Identificador)?;
         self.consumir(TokenKind::AbrePar)?;
 
@@ -878,7 +829,7 @@ impl Parser {
             parametros,
             retorno,
             bloco,
-            pos: inicio.pos,
+            pos: nome.pos,
         })
     }
 
@@ -892,8 +843,10 @@ impl Parser {
             _ => {
                 return Err(NeoErro::Sintaxe {
                     pos: token.pos,
-                    mensagem: "Esperado um tipo de função: decimal, string, boolean ou vazio.".into(),
-                })
+                    codigo: "NEO1104",
+                    mensagem: "Esperado um tipo de função: decimal, string, boolean ou vazio."
+                        .into(),
+                });
             }
         };
         self.avancar();
@@ -919,9 +872,10 @@ impl Parser {
     fn or(&mut self) -> Result<Expr, NeoErro> {
         let mut esquerda = self.and()?;
         while self.token_atual_seguro().kind == TokenKind::Or {
+            let pos = self.token_atual_seguro().pos;
             self.avancar();
+            self.contar_operador()?;
             let direita = self.and()?;
-            let pos = esquerda.pos;
             esquerda = Expr {
                 kind: Expressao::Or(Box::new(esquerda), Box::new(direita)),
                 pos,
@@ -930,7 +884,42 @@ impl Parser {
         Ok(esquerda)
     }
 
+    fn contar_operador(&mut self) -> Result<(), NeoErro> {
+        self.operadores += 1;
+        if self.operadores > MAX_OPERADORES_POR_INSTRUCAO {
+            return Err(NeoErro::Sintaxe {
+                pos: self.token_atual_seguro().pos,
+                codigo: "NEO1107",
+                mensagem: "A instrução tem operadores demais. Divida o cálculo em partes menores."
+                    .into(),
+            });
+        }
+        Ok(())
+    }
+
+    fn entrar_nivel(&mut self) -> Result<(), NeoErro> {
+        self.profundidade += 1;
+        if self.profundidade > MAX_PROFUNDIDADE_PARSER {
+            return Err(NeoErro::Sintaxe {
+                pos: self.token_atual_seguro().pos,
+                codigo: "NEO1107", mensagem: "O código está aninhado demais. Simplifique a expressão ou divida o bloco em partes menores.".into(),
+            });
+        }
+        Ok(())
+    }
+
+    fn sair_nivel(&mut self) {
+        self.profundidade = self.profundidade.saturating_sub(1);
+    }
+
     fn nao(&mut self) -> Result<Expr, NeoErro> {
+        self.entrar_nivel()?;
+        let resultado = self.nao_interno();
+        self.sair_nivel();
+        resultado
+    }
+
+    fn nao_interno(&mut self) -> Result<Expr, NeoErro> {
         let token = self.token_atual_seguro();
         if token.kind == TokenKind::Not {
             self.avancar();
@@ -946,9 +935,10 @@ impl Parser {
     fn and(&mut self) -> Result<Expr, NeoErro> {
         let mut esquerda = self.nao()?;
         while self.token_atual_seguro().kind == TokenKind::And {
+            let pos = self.token_atual_seguro().pos;
             self.avancar();
+            self.contar_operador()?;
             let direita = self.nao()?;
-            let pos = esquerda.pos;
             esquerda = Expr {
                 kind: Expressao::And(Box::new(esquerda), Box::new(direita)),
                 pos,
@@ -970,9 +960,10 @@ impl Parser {
                 TokenKind::Diferente => 5,
                 _ => break,
             };
+            let pos = self.token_atual_seguro().pos;
             self.avancar();
+            self.contar_operador()?;
             let direita = self.termo()?;
-            let pos = esquerda.pos;
             esquerda = Expr {
                 kind: match op {
                     0 => Expressao::Maior(Box::new(esquerda), Box::new(direita)),
@@ -995,9 +986,10 @@ impl Parser {
             if kind != TokenKind::Mais && kind != TokenKind::Menos {
                 break;
             }
+            let pos = self.token_atual_seguro().pos;
             self.avancar();
+            self.contar_operador()?;
             let direita = self.fator()?;
-            let pos = esquerda.pos;
             esquerda = Expr {
                 kind: if kind == TokenKind::Mais {
                     Expressao::Soma(Box::new(esquerda), Box::new(direita))
@@ -1014,15 +1006,21 @@ impl Parser {
         let mut esquerda = self.unario()?;
         loop {
             let kind = self.token_atual_seguro().kind.clone();
-            if !matches!(kind, TokenKind::Multiplica | TokenKind::Divide | TokenKind::Modulo) {
+            if !matches!(
+                kind,
+                TokenKind::Multiplica | TokenKind::Divide | TokenKind::Modulo
+            ) {
                 break;
             }
+            let pos = self.token_atual_seguro().pos;
             self.avancar();
+            self.contar_operador()?;
             let direita = self.unario()?;
-            let pos = esquerda.pos;
             esquerda = Expr {
                 kind: match kind {
-                    TokenKind::Multiplica => Expressao::Multiplicacao(Box::new(esquerda), Box::new(direita)),
+                    TokenKind::Multiplica => {
+                        Expressao::Multiplicacao(Box::new(esquerda), Box::new(direita))
+                    }
                     TokenKind::Divide => Expressao::Divisao(Box::new(esquerda), Box::new(direita)),
                     _ => Expressao::Modulo(Box::new(esquerda), Box::new(direita)),
                 },
@@ -1033,6 +1031,13 @@ impl Parser {
     }
 
     fn unario(&mut self) -> Result<Expr, NeoErro> {
+        self.entrar_nivel()?;
+        let resultado = self.unario_interno();
+        self.sair_nivel();
+        resultado
+    }
+
+    fn unario_interno(&mut self) -> Result<Expr, NeoErro> {
         let token = self.token_atual_seguro();
         if token.kind == TokenKind::Not {
             self.avancar();
@@ -1054,12 +1059,20 @@ impl Parser {
     }
 
     fn primario(&mut self) -> Result<Expr, NeoErro> {
+        self.entrar_nivel()?;
+        let resultado = self.primario_interno();
+        self.sair_nivel();
+        resultado
+    }
+
+    fn primario_interno(&mut self) -> Result<Expr, NeoErro> {
         let token = self.token_atual_seguro();
         match token.kind {
             TokenKind::Numero => {
                 self.avancar();
                 let valor = Decimal::from_str(&token.texto).map_err(|_| NeoErro::Sintaxe {
                     pos: token.pos,
+                    codigo: "NEO1003",
                     mensagem: format!("Número decimal inválido: '{}'.", token.texto),
                 })?;
                 Ok(Expr {
@@ -1118,6 +1131,7 @@ impl Parser {
             }
             _ => Err(NeoErro::Sintaxe {
                 pos: token.pos,
+                codigo: "NEO1102",
                 mensagem: format!(
                     "Expressão inesperada '{}'. Esperado número, string, true, false, variável, chamada de função ou expressão entre parênteses.",
                     token.texto
@@ -1137,6 +1151,7 @@ fn erro_interpolacao(trecho: &str, pos: Posicao, erro: &NeoErro) -> NeoErro {
     };
     NeoErro::Sintaxe {
         pos,
+        codigo: "NEO1106",
         mensagem: format!("Interpolação inválida em '{{{}}}': {}", trecho, detalhe),
     }
 }
@@ -1189,13 +1204,16 @@ fn dividir_interpolacao(texto: &str, pos: Posicao) -> Result<Expressao, NeoErro>
         let deslocamento = inicio + esquerda;
         let mut tokens = lex(corte).map_err(|e| erro_interpolacao(corte, pos, &e))?;
         for token in tokens.iter_mut() {
-            token.pos = Posicao::nova(pos.linha, pos.coluna + deslocamento + token.pos.coluna);
+            let largura = token.pos.largura();
+            let nova_coluna = pos.coluna + deslocamento + token.pos.coluna;
+            token.pos = Posicao::nova(pos.linha, nova_coluna).ate(nova_coluna + largura);
         }
         let mut parser = Parser::novo(tokens);
         let valor = parser.expressao()?;
         if parser.token_atual_seguro().kind != TokenKind::Fim {
             return Err(NeoErro::Sintaxe {
                 pos,
+                codigo: "NEO1106",
                 mensagem: format!("Expressão inválida dentro da interpolação: '{}'.", corte),
             });
         }
@@ -1273,7 +1291,6 @@ struct Funcao {
     parametros: Vec<Parametro>,
     retorno: Tipo,
     bloco: Vec<Instrucao>,
-    pos: Posicao,
 }
 
 #[derive(Debug, Clone)]
@@ -1325,12 +1342,13 @@ impl AnalisadorSemantico {
                 ..
             } = instrucao
             {
-                if self.funcoes.contains_key(nome) {
+                if let Some(anterior) = self.funcoes.get(nome) {
                     return Err(NeoErro::Semantico {
                         pos: *pos,
+                        codigo: "NEO2104",
                         mensagem: format!(
-                            "A função '{}' já foi declarada. Cada função precisa ter um nome único.",
-                            nome
+                            "A função '{}' já foi declarada na linha {}. Cada função precisa ter um nome único.",
+                            nome, anterior.pos.linha
                         ),
                     });
                 }
@@ -1349,13 +1367,17 @@ impl AnalisadorSemantico {
         // Isso permite que funções sejam analisadas independentemente da
         // posição textual da declaração global.
         for instrucao in programa {
-            if let Instrucao::Declarar { tipo, nome, pos, .. } = instrucao {
-                if self.globais.contains_key(nome) {
+            if let Instrucao::Declarar {
+                tipo, nome, pos, ..
+            } = instrucao
+            {
+                if let Some(anterior) = self.globais.get(nome) {
                     return Err(NeoErro::Semantico {
                         pos: *pos,
+                        codigo: "NEO2104",
                         mensagem: format!(
-                            "A variável global '{}' já foi declarada neste nível.",
-                            nome
+                            "A variável global '{}' já foi declarada na linha {}.",
+                            nome, anterior.pos.linha
                         ),
                     });
                 }
@@ -1412,13 +1434,15 @@ impl AnalisadorSemantico {
                 None => {
                     return Err(NeoErro::Semantico {
                         pos: parametro.pos,
+                        codigo: "NEO2108",
                         mensagem: "Falha interna ao criar o escopo dos parâmetros.".into(),
-                    })
+                    });
                 }
             };
             if escopo.contains_key(&parametro.nome) {
                 return Err(NeoErro::Semantico {
                     pos: parametro.pos,
+                    codigo: "NEO2104",
                     mensagem: format!(
                         "O parâmetro '{}' foi declarado mais de uma vez na função '{}'.",
                         parametro.nome, nome
@@ -1439,6 +1463,7 @@ impl AnalisadorSemantico {
             resultado.map(|_| ())?;
             return Err(NeoErro::Semantico {
                 pos,
+                codigo: "NEO2106",
                 mensagem: format!(
                     "A função '{}' declara retorno '{}' mas existe um caminho que pode terminar sem 'return'.",
                     nome,
@@ -1463,7 +1488,12 @@ impl AnalisadorSemantico {
 
     fn instrucao(&mut self, instrucao: &Instrucao) -> Result<(), NeoErro> {
         match instrucao {
-            Instrucao::Declarar { tipo, nome, valor, pos } => {
+            Instrucao::Declarar {
+                tipo,
+                nome,
+                valor,
+                pos,
+            } => {
                 let ja_existe = self
                     .escopos_locais
                     .last()
@@ -1472,19 +1502,18 @@ impl AnalisadorSemantico {
                 if ja_existe {
                     return Err(NeoErro::Semantico {
                         pos: *pos,
-                        mensagem: format!(
-                            "A variável '{}' já foi declarada neste escopo.",
-                            nome
-                        ),
+                        codigo: "NEO2104",
+                        mensagem: format!("A variável '{}' já foi declarada neste escopo.", nome),
                     });
                 }
 
                 let tipo_valor = self.expressao(valor)?;
                 if tipo_valor != *tipo {
                     return Err(NeoErro::Tipo {
-                        pos: *pos,
+                        pos: valor.pos,
                         esperado: tipo.nome().into(),
                         recebido: tipo_valor.nome().into(),
+                        codigo: "NEO2002",
                         contexto: format!(
                             "A declaração de '{}' exige que o valor inicial seja {}.",
                             nome,
@@ -1506,25 +1535,33 @@ impl AnalisadorSemantico {
                 if self.funcao_atual.is_none() && self.escopos_locais.is_empty() {
                     self.globais_declaradas.insert(nome.clone());
                 }
-
             }
-            Instrucao::Atribuir { nome, operador, valor, pos } => {
-                let tipo_variavel = self.buscar_variavel(nome).ok_or_else(|| NeoErro::Semantico {
-                    pos: *pos,
-                    mensagem: format!(
-                        "A variável '{}' não foi declarada. Declare-a antes de usá-la.",
-                        nome
-                    ),
-                })?;
+            Instrucao::Atribuir {
+                nome,
+                operador,
+                valor,
+                pos,
+            } => {
+                let tipo_variavel =
+                    self.buscar_variavel(nome)
+                        .ok_or_else(|| NeoErro::Semantico {
+                            pos: *pos,
+                            codigo: "NEO2101",
+                            mensagem: format!(
+                                "A variável '{}' não foi declarada. Declare-a antes de usá-la.",
+                                nome
+                            ),
+                        })?;
                 let tipo_valor = self.expressao(valor)?;
 
                 match operador {
                     OperadorAtribuicao::Igual => {
                         if tipo_variavel != tipo_valor {
                             return Err(NeoErro::Tipo {
-                                pos: *pos,
+                                pos: valor.pos,
                                 esperado: tipo_variavel.nome().into(),
                                 recebido: tipo_valor.nome().into(),
+                                codigo: "NEO2002",
                                 contexto: format!(
                                     "A variável '{}' foi declarada como {} e não pode receber {}.",
                                     nome,
@@ -1535,15 +1572,22 @@ impl AnalisadorSemantico {
                         }
                     }
                     OperadorAtribuicao::Mais => {
-                        let valido =
-                            (tipo_variavel == Tipo::Decimal && tipo_valor == Tipo::Decimal)
-                                || (tipo_variavel == Tipo::String && tipo_valor == Tipo::String);
+                        let valido = (tipo_variavel == Tipo::Decimal
+                            && tipo_valor == Tipo::Decimal)
+                            || (tipo_variavel == Tipo::String && tipo_valor == Tipo::String);
                         if !valido {
                             return Err(NeoErro::Tipo {
                                 pos: *pos,
                                 esperado: "decimal + decimal ou string + string".into(),
-                                recebido: format!("{} + {}", tipo_variavel.nome(), tipo_valor.nome()),
-                                contexto: "O operador '+=' exige dois operandos do mesmo tipo compatível.".into(),
+                                recebido: format!(
+                                    "{} + {}",
+                                    tipo_variavel.nome(),
+                                    tipo_valor.nome()
+                                ),
+                                codigo: "NEO2001",
+                                contexto:
+                                    "O operador '+=' exige dois operandos do mesmo tipo compatível."
+                                        .into(),
                             });
                         }
                     }
@@ -1555,8 +1599,15 @@ impl AnalisadorSemantico {
                             return Err(NeoErro::Tipo {
                                 pos: *pos,
                                 esperado: "decimal".into(),
-                                recebido: format!("{} e {}", tipo_variavel.nome(), tipo_valor.nome()),
-                                contexto: "Esta atribuição composta trabalha apenas com valores decimal.".into(),
+                                recebido: format!(
+                                    "{} e {}",
+                                    tipo_variavel.nome(),
+                                    tipo_valor.nome()
+                                ),
+                                codigo: "NEO2001",
+                                contexto:
+                                    "Esta atribuição composta trabalha apenas com valores decimal."
+                                        .into(),
                             });
                         }
                     }
@@ -1568,13 +1619,19 @@ impl AnalisadorSemantico {
             Instrucao::Display { valor, .. } => {
                 self.expressao(valor)?;
             }
-            Instrucao::If { condicao, verdadeiro, falso, pos } => {
+            Instrucao::If {
+                condicao,
+                verdadeiro,
+                falso,
+                ..
+            } => {
                 let tipo = self.expressao(condicao)?;
                 if tipo != Tipo::Boolean {
                     return Err(NeoErro::Tipo {
-                        pos: *pos,
+                        pos: condicao.pos,
                         esperado: "boolean".into(),
                         recebido: tipo.nome().into(),
+                        codigo: "NEO2003",
                         contexto: "A condição de 'if' precisa produzir true ou false.".into(),
                     });
                 }
@@ -1587,13 +1644,16 @@ impl AnalisadorSemantico {
                 self.sair_escopo();
                 r2?;
             }
-            Instrucao::While { condicao, bloco, pos } => {
+            Instrucao::While {
+                condicao, bloco, ..
+            } => {
                 let tipo = self.expressao(condicao)?;
                 if tipo != Tipo::Boolean {
                     return Err(NeoErro::Tipo {
-                        pos: *pos,
+                        pos: condicao.pos,
                         esperado: "boolean".into(),
                         recebido: tipo.nome().into(),
+                        codigo: "NEO2003",
                         contexto: "A condição de 'while' precisa produzir true ou false.".into(),
                     });
                 }
@@ -1605,7 +1665,7 @@ impl AnalisadorSemantico {
             Instrucao::Funcao { .. } => {
                 return Err(NeoErro::Semantico {
                     pos: instrucao.pos(),
-                    mensagem: "Uma definição de função não pode aparecer dentro de outra função ou bloco nesta versão.".into(),
+                    codigo: "NEO2107", mensagem: "Uma definição de função não pode aparecer dentro de outra função ou bloco nesta versão.".into(),
                 });
             }
             Instrucao::Return { valor, pos } => {
@@ -1614,8 +1674,9 @@ impl AnalisadorSemantico {
                     None => {
                         return Err(NeoErro::Semantico {
                             pos: *pos,
+                            codigo: "NEO2105",
                             mensagem: "'return' só pode ser usado dentro de uma função.".into(),
-                        })
+                        });
                     }
                 };
 
@@ -1624,10 +1685,10 @@ impl AnalisadorSemantico {
                     (Tipo::Vazio, Some(expr)) => {
                         let tipo = self.expressao(expr)?;
                         return Err(NeoErro::Tipo {
-                            pos: *pos,
+                            pos: expr.pos,
                             esperado: "vazio".into(),
                             recebido: tipo.nome().into(),
-                            contexto: "Uma função '-> vazio' deve usar apenas 'return' sem valor, ou simplesmente terminar.".into(),
+                            codigo: "NEO2005", contexto: "Uma função '-> vazio' deve usar apenas 'return' sem valor, ou simplesmente terminar.".into(),
                         });
                     }
                     (esperado, None) => {
@@ -1635,6 +1696,7 @@ impl AnalisadorSemantico {
                             pos: *pos,
                             esperado: esperado.nome().into(),
                             recebido: "vazio".into(),
+                            codigo: "NEO2005",
                             contexto: format!(
                                 "A função atual exige um valor de retorno {}.",
                                 esperado.nome()
@@ -1645,10 +1707,10 @@ impl AnalisadorSemantico {
                         let recebido = self.expressao(expr)?;
                         if esperado != recebido {
                             return Err(NeoErro::Tipo {
-                                pos: *pos,
+                                pos: expr.pos,
                                 esperado: esperado.nome().into(),
                                 recebido: recebido.nome().into(),
-                                contexto: "O valor retornado precisa ter exatamente o tipo declarado na assinatura da função.".into(),
+                                codigo: "NEO2005", contexto: "O valor retornado precisa ter exatamente o tipo declarado na assinatura da função.".into(),
                             });
                         }
                     }
@@ -1669,7 +1731,7 @@ impl AnalisadorSemantico {
                                 pos: e.pos,
                                 esperado: "decimal, string ou boolean".into(),
                                 recebido: "vazio".into(),
-                                contexto: "Uma função 'vazio' não produz valor para a interpolação.".into(),
+                                codigo: "NEO2006", contexto: "Uma função 'vazio' não produz valor para a interpolação.".into(),
                             });
                         }
                     }
@@ -1681,7 +1743,7 @@ impl AnalisadorSemantico {
             Expressao::Boolean(_) => Ok(Tipo::Boolean),
             Expressao::Variavel(nome) => self.buscar_variavel(nome).ok_or_else(|| NeoErro::Semantico {
                 pos: expr.pos,
-                mensagem: format!(
+                codigo: "NEO2101", mensagem: format!(
                     "A variável '{}' não foi declarada. Declare-a antes de usá-la. Dentro de funções, só estão disponíveis os parâmetros, as variáveis da própria função e as globais.",
                     nome
                 ),
@@ -1693,7 +1755,7 @@ impl AnalisadorSemantico {
                         pos: expr.pos,
                         esperado: "decimal".into(),
                         recebido: tipo.nome().into(),
-                        contexto: "O operador unário '-' só pode ser aplicado a decimal.".into(),
+                        codigo: "NEO2001", contexto: "O operador unário '-' só pode ser aplicado a decimal.".into(),
                     });
                 }
                 Ok(Tipo::Decimal)
@@ -1707,7 +1769,7 @@ impl AnalisadorSemantico {
                         pos: expr.pos,
                         esperado: "decimal + decimal ou string + string".into(),
                         recebido: format!("{} + {}", ta.nome(), tb.nome()),
-                        contexto: "Não há conversão implícita entre os tipos.".into(),
+                        codigo: "NEO2001", contexto: "Não há conversão implícita entre os tipos.".into(),
                     }),
                 }
             }
@@ -1722,7 +1784,7 @@ impl AnalisadorSemantico {
                         pos: expr.pos,
                         esperado: "decimal e decimal".into(),
                         recebido: format!("{} e {}", ta.nome(), tb.nome()),
-                        contexto: "Este operador aritmético trabalha somente com decimal.".into(),
+                        codigo: "NEO2001", contexto: "Este operador aritmético trabalha somente com decimal.".into(),
                     });
                 }
                 Ok(Tipo::Decimal)
@@ -1738,7 +1800,7 @@ impl AnalisadorSemantico {
                         pos: expr.pos,
                         esperado: "decimal e decimal".into(),
                         recebido: format!("{} e {}", ta.nome(), tb.nome()),
-                        contexto: "Comparações ordenadas não fazem conversão automática de string ou boolean.".into(),
+                        codigo: "NEO2001", contexto: "Comparações ordenadas não fazem conversão automática de string ou boolean.".into(),
                     });
                 }
                 Ok(Tipo::Boolean)
@@ -1751,7 +1813,7 @@ impl AnalisadorSemantico {
                         pos: expr.pos,
                         esperado: ta.nome().into(),
                         recebido: tb.nome().into(),
-                        contexto: "'==' e '!=' exigem operandos do mesmo tipo.".into(),
+                        codigo: "NEO2001", contexto: "'==' e '!=' exigem operandos do mesmo tipo.".into(),
                     });
                 }
                 Ok(Tipo::Boolean)
@@ -1764,7 +1826,7 @@ impl AnalisadorSemantico {
                         pos: expr.pos,
                         esperado: "boolean e boolean".into(),
                         recebido: format!("{} e {}", ta.nome(), tb.nome()),
-                        contexto: "Use 'and' e 'or' somente com condições boolean.".into(),
+                        codigo: "NEO2001", contexto: "Use 'and' e 'or' somente com condições boolean.".into(),
                     });
                 }
                 Ok(Tipo::Boolean)
@@ -1776,7 +1838,7 @@ impl AnalisadorSemantico {
                         pos: expr.pos,
                         esperado: "boolean".into(),
                         recebido: tipo.nome().into(),
-                        contexto: "'not' só pode ser aplicado a boolean.".into(),
+                        codigo: "NEO2001", contexto: "'not' só pode ser aplicado a boolean.".into(),
                     });
                 }
                 Ok(Tipo::Boolean)
@@ -1784,7 +1846,7 @@ impl AnalisadorSemantico {
             Expressao::Chamada { nome, argumentos } => {
                 let assinatura = self.funcoes.get(nome).ok_or_else(|| NeoErro::Semantico {
                     pos: expr.pos,
-                    mensagem: format!(
+                    codigo: "NEO2102", mensagem: format!(
                         "A função '{}' não existe. Verifique o nome ou declare a função antes de executar o programa.",
                         nome
                     ),
@@ -1792,7 +1854,7 @@ impl AnalisadorSemantico {
                 if argumentos.len() != assinatura.parametros.len() {
                     return Err(NeoErro::Semantico {
                         pos: expr.pos,
-                        mensagem: format!(
+                        codigo: "NEO2103", mensagem: format!(
                             "A função '{}' espera {} argumento(s), mas recebeu {}.",
                             nome,
                             assinatura.parametros.len(),
@@ -1811,7 +1873,7 @@ impl AnalisadorSemantico {
                             pos: argumento.pos,
                             esperado: esperado.nome().into(),
                             recebido: recebido.nome().into(),
-                            contexto: format!(
+                            codigo: "NEO2004", contexto: format!(
                                 "O argumento {} da função '{}' deveria ser {}.",
                                 indice + 1,
                                 nome,
@@ -1850,8 +1912,13 @@ fn bloco_garante_retorno(bloco: &[Instrucao]) -> bool {
     for instrucao in bloco {
         match instrucao {
             Instrucao::Return { .. } => return true,
-            Instrucao::If { verdadeiro, falso, .. } => {
-                if !falso.is_empty() && bloco_garante_retorno(verdadeiro) && bloco_garante_retorno(falso) {
+            Instrucao::If {
+                verdadeiro, falso, ..
+            } => {
+                if !falso.is_empty()
+                    && bloco_garante_retorno(verdadeiro)
+                    && bloco_garante_retorno(falso)
+                {
                     return true;
                 }
             }
@@ -1889,7 +1956,7 @@ impl Runtime {
                 parametros,
                 retorno,
                 bloco,
-                pos,
+                ..
             } = instrucao
             {
                 self.funcoes.insert(
@@ -1898,7 +1965,6 @@ impl Runtime {
                         parametros: parametros.clone(),
                         retorno: retorno.clone(),
                         bloco: bloco.clone(),
-                        pos: *pos,
                     },
                 );
             }
@@ -1911,6 +1977,7 @@ impl Runtime {
             if self.executar_instrucao(instrucao)?.is_some() {
                 return Err(NeoErro::Semantico {
                     pos: instrucao.pos(),
+                    codigo: "NEO2105",
                     mensagem: "'return' não pode escapar de uma função.".into(),
                 });
             }
@@ -1920,7 +1987,9 @@ impl Runtime {
 
     fn executar_instrucao(&mut self, instrucao: &Instrucao) -> Result<Option<NeoValor>, NeoErro> {
         match instrucao {
-            Instrucao::Declarar { nome, valor, pos, .. } => {
+            Instrucao::Declarar {
+                nome, valor, pos, ..
+            } => {
                 let resultado = self.avaliar(valor, *pos)?;
                 if let Some(escopo) = self.locais.last_mut() {
                     escopo.insert(nome.clone(), resultado);
@@ -1928,11 +1997,20 @@ impl Runtime {
                     self.globais.insert(nome.clone(), resultado);
                 }
             }
-            Instrucao::Atribuir { nome, operador, valor, pos } => {
+            Instrucao::Atribuir {
+                nome,
+                operador,
+                valor,
+                pos,
+            } => {
                 let novo = self.avaliar(valor, *pos)?;
                 let antigo = self.buscar_valor(nome).ok_or_else(|| NeoErro::Runtime {
                     pos: *pos,
-                    mensagem: format!("A variável '{}' não existe em nenhum escopo acessível.", nome),
+                    codigo: "NEO3005",
+                    mensagem: format!(
+                        "A variável '{}' não existe em nenhum escopo acessível.",
+                        nome
+                    ),
                 })?;
                 let resultado = self.aplicar_atribuicao(antigo, novo, operador, *pos)?;
                 if let Some(indice) = self.encontrar_escopo_local(nome) {
@@ -1941,6 +2019,7 @@ impl Runtime {
                     } else {
                         return Err(NeoErro::Runtime {
                             pos: *pos,
+                            codigo: "NEO3010",
                             mensagem: "Falha ao acessar o escopo local durante atribuição.".into(),
                         });
                     }
@@ -1949,7 +2028,11 @@ impl Runtime {
                 } else {
                     return Err(NeoErro::Runtime {
                         pos: *pos,
-                        mensagem: format!("A variável '{}' não existe em nenhum escopo acessível.", nome),
+                        codigo: "NEO3005",
+                        mensagem: format!(
+                            "A variável '{}' não existe em nenhum escopo acessível.",
+                            nome
+                        ),
                     });
                 }
             }
@@ -1958,7 +2041,12 @@ impl Runtime {
                 let texto = resultado.texto();
                 println!("{}", texto);
             }
-            Instrucao::If { condicao, verdadeiro, falso, pos } => {
+            Instrucao::If {
+                condicao,
+                verdadeiro,
+                falso,
+                pos,
+            } => {
                 let resultado = self.avaliar(condicao, *pos)?;
                 match resultado {
                     NeoValor::Boolean(true) => {
@@ -1976,12 +2064,17 @@ impl Runtime {
                             pos: *pos,
                             esperado: "boolean".into(),
                             recebido: outro.tipo().nome().into(),
+                            codigo: "NEO2003",
                             contexto: "A condição de 'if' precisa ser boolean.".into(),
                         });
                     }
                 }
             }
-            Instrucao::While { condicao, bloco, pos } => loop {
+            Instrucao::While {
+                condicao,
+                bloco,
+                pos,
+            } => loop {
                 let resultado = self.avaliar(condicao, *pos)?;
                 match resultado {
                     NeoValor::Boolean(true) => {
@@ -1995,6 +2088,7 @@ impl Runtime {
                             pos: *pos,
                             esperado: "boolean".into(),
                             recebido: outro.tipo().nome().into(),
+                            codigo: "NEO2003",
                             contexto: "A condição de 'while' precisa ser boolean.".into(),
                         });
                     }
@@ -2008,6 +2102,7 @@ impl Runtime {
                 if self.locais.is_empty() {
                     return Err(NeoErro::Semantico {
                         pos: *pos,
+                        codigo: "NEO2105",
                         mensagem: "'return' só pode ser usado dentro de uma função.".into(),
                     });
                 }
@@ -2061,7 +2156,11 @@ impl Runtime {
             Expressao::Boolean(v) => Ok(NeoValor::Boolean(*v)),
             Expressao::Variavel(nome) => self.buscar_valor(nome).ok_or_else(|| NeoErro::Runtime {
                 pos,
-                mensagem: format!("A variável '{}' não existe em nenhum escopo acessível.", nome),
+                codigo: "NEO3005",
+                mensagem: format!(
+                    "A variável '{}' não existe em nenhum escopo acessível.",
+                    nome
+                ),
             }),
             Expressao::Negativo(valor) => match self.avaliar(valor, pos_fallback)? {
                 NeoValor::Decimal(v) => Ok(NeoValor::Decimal(-v)),
@@ -2069,6 +2168,7 @@ impl Runtime {
                     pos,
                     esperado: "decimal".into(),
                     recebido: outro.tipo().nome().into(),
+                    codigo: "NEO2001",
                     contexto: "O operador '-' exige decimal.".into(),
                 }),
             },
@@ -2077,23 +2177,41 @@ impl Runtime {
                 let vb = self.avaliar(b, pos_fallback)?;
                 match (va, vb) {
                     (NeoValor::Decimal(a), NeoValor::Decimal(b)) => a
-                    .checked_add(b)
-                    .map(NeoValor::Decimal)
-                    .ok_or_else(|| NeoErro::Runtime {
-                        pos,
-                        mensagem: "Overflow aritmético em '+'.".into(),
-                    }),
-                    (NeoValor::String(a), NeoValor::String(b)) => Ok(NeoValor::String(format!("{}{}", a, b))),
+                        .checked_add(b)
+                        .map(NeoValor::Decimal)
+                        .ok_or_else(|| NeoErro::Runtime {
+                            pos,
+                            codigo: "NEO3003",
+                            mensagem: "Overflow aritmético em '+'.".into(),
+                        }),
+                    (NeoValor::String(a), NeoValor::String(b)) => {
+                        Ok(NeoValor::String(format!("{}{}", a, b)))
+                    }
                     (a, b) => Err(NeoErro::Tipo {
                         pos,
                         esperado: "decimal + decimal ou string + string".into(),
                         recebido: format!("{} + {}", a.tipo().nome(), b.tipo().nome()),
+                        codigo: "NEO2001",
                         contexto: "Os tipos precisam ser compatíveis com '+'.".into(),
                     }),
                 }
             }
-            Expressao::Subtracao(a, b) => self.operacao_decimal(a, b, pos, |x, y| x.checked_sub(y), "decimal - decimal", pos_fallback),
-            Expressao::Multiplicacao(a, b) => self.operacao_decimal(a, b, pos, |x, y| x.checked_mul(y), "decimal * decimal", pos_fallback),
+            Expressao::Subtracao(a, b) => self.operacao_decimal(
+                a,
+                b,
+                pos,
+                |x, y| x.checked_sub(y),
+                "decimal - decimal",
+                pos_fallback,
+            ),
+            Expressao::Multiplicacao(a, b) => self.operacao_decimal(
+                a,
+                b,
+                pos,
+                |x, y| x.checked_mul(y),
+                "decimal * decimal",
+                pos_fallback,
+            ),
             Expressao::Divisao(a, b) => {
                 let va = self.avaliar(a, pos_fallback)?;
                 let vb = self.avaliar(b, pos_fallback)?;
@@ -2102,21 +2220,24 @@ impl Runtime {
                         if b.is_zero() {
                             Err(NeoErro::Runtime {
                                 pos,
+                                codigo: "NEO3001",
                                 mensagem: "Divisão por zero não é permitida.".into(),
                             })
                         } else {
-                            a.checked_div(b)
-                                .map(NeoValor::Decimal)
-                                .ok_or_else(|| NeoErro::Runtime {
+                            a.checked_div(b).map(NeoValor::Decimal).ok_or_else(|| {
+                                NeoErro::Runtime {
                                     pos,
+                                    codigo: "NEO3003",
                                     mensagem: "Overflow aritmético em '/'.".into(),
-                                })
+                                }
+                            })
                         }
                     }
                     (a, b) => Err(NeoErro::Tipo {
                         pos,
                         esperado: "decimal / decimal".into(),
                         recebido: format!("{} / {}", a.tipo().nome(), b.tipo().nome()),
+                        codigo: "NEO2001",
                         contexto: "A divisão exige dois valores decimal.".into(),
                     }),
                 }
@@ -2129,21 +2250,24 @@ impl Runtime {
                         if b.is_zero() {
                             Err(NeoErro::Runtime {
                                 pos,
+                                codigo: "NEO3002",
                                 mensagem: "Módulo por zero não é permitido.".into(),
                             })
                         } else {
-                            a.checked_rem(b)
-                                .map(NeoValor::Decimal)
-                                .ok_or_else(|| NeoErro::Runtime {
+                            a.checked_rem(b).map(NeoValor::Decimal).ok_or_else(|| {
+                                NeoErro::Runtime {
                                     pos,
+                                    codigo: "NEO3003",
                                     mensagem: "Overflow aritmético em '%'.".into(),
-                                })
+                                }
+                            })
                         }
                     }
                     (a, b) => Err(NeoErro::Tipo {
                         pos,
                         esperado: "decimal % decimal".into(),
                         recebido: format!("{} % {}", a.tipo().nome(), b.tipo().nome()),
+                        codigo: "NEO2001",
                         contexto: "O módulo exige dois valores decimal.".into(),
                     }),
                 }
@@ -2160,6 +2284,7 @@ impl Runtime {
                         pos,
                         esperado: va.tipo().nome().into(),
                         recebido: vb.tipo().nome().into(),
+                        codigo: "NEO2001",
                         contexto: "'==' exige valores do mesmo tipo.".into(),
                     });
                 }
@@ -2173,6 +2298,7 @@ impl Runtime {
                         pos,
                         esperado: va.tipo().nome().into(),
                         recebido: vb.tipo().nome().into(),
+                        codigo: "NEO2001",
                         contexto: "'!=' exige valores do mesmo tipo.".into(),
                     });
                 }
@@ -2218,6 +2344,7 @@ impl Runtime {
                 Some(resultado) => Ok(NeoValor::Decimal(resultado)),
                 None => Err(NeoErro::Runtime {
                     pos,
+                    codigo: "NEO3003",
                     mensagem: "Overflow aritmético em operação decimal.".into(),
                 }),
             },
@@ -2225,6 +2352,7 @@ impl Runtime {
                 pos,
                 esperado: esperado.into(),
                 recebido: format!("{} e {}", a.tipo().nome(), b.tipo().nome()),
+                codigo: "NEO2001",
                 contexto: "A operação aritmética exige valores decimal.".into(),
             }),
         }
@@ -2249,6 +2377,7 @@ impl Runtime {
                 pos,
                 esperado: "decimal e decimal".into(),
                 recebido: format!("{} e {}", a.tipo().nome(), b.tipo().nome()),
+                codigo: "NEO2001",
                 contexto: "Comparações ordenadas exigem decimal.".into(),
             }),
         }
@@ -2261,25 +2390,33 @@ impl Runtime {
                 pos: expr.pos,
                 esperado: "boolean".into(),
                 recebido: outro.tipo().nome().into(),
+                codigo: "NEO2001",
                 contexto: "Era esperado true ou false.".into(),
             }),
         }
     }
 
-    fn chamar_funcao(&mut self, nome: &str, argumentos: &[Expr], pos: Posicao) -> Result<NeoValor, NeoErro> {
+    fn chamar_funcao(
+        &mut self,
+        nome: &str,
+        argumentos: &[Expr],
+        pos: Posicao,
+    ) -> Result<NeoValor, NeoErro> {
         let funcao = match self.funcoes.get(nome) {
             Some(f) => f.clone(),
             None => {
                 return Err(NeoErro::Runtime {
                     pos,
+                    codigo: "NEO3006",
                     mensagem: format!("A função '{}' não existe.", nome),
-                })
+                });
             }
         };
 
         if argumentos.len() != funcao.parametros.len() {
             return Err(NeoErro::Runtime {
                 pos,
+                codigo: "NEO3007",
                 mensagem: format!(
                     "A função '{}' espera {} argumento(s), mas recebeu {}.",
                     nome,
@@ -2292,6 +2429,7 @@ impl Runtime {
         if self.profundidade_funcoes >= MAX_PROFUNDIDADE_FUNCAO {
             return Err(NeoErro::Runtime {
                 pos,
+                codigo: "NEO3004",
                 mensagem: format!(
                     "profundidade máxima de chamadas de função excedida. A função '{}' atingiu o limite de {} chamadas aninhadas. Isso normalmente indica uma recursão sem condição de parada.",
                     nome, MAX_PROFUNDIDADE_FUNCAO
@@ -2301,13 +2439,16 @@ impl Runtime {
 
         // Os argumentos são avaliados no ambiente do chamador.
         let mut novo_escopo = HashMap::new();
-        for (indice, (parametro, argumento)) in funcao.parametros.iter().zip(argumentos.iter()).enumerate() {
+        for (indice, (parametro, argumento)) in
+            funcao.parametros.iter().zip(argumentos.iter()).enumerate()
+        {
             let valor = self.avaliar(argumento, pos)?;
             if valor.tipo() != parametro.tipo {
                 return Err(NeoErro::Tipo {
                     pos: argumento.pos,
                     esperado: parametro.tipo.nome().into(),
                     recebido: valor.tipo().nome().into(),
+                    codigo: "NEO2004",
                     contexto: format!(
                         "O argumento {} de '{}' não corresponde ao parâmetro '{}'.",
                         indice + 1,
@@ -2323,7 +2464,7 @@ impl Runtime {
         let locais_do_chamador = std::mem::take(&mut self.locais);
         self.locais.push(novo_escopo);
 
-        let resultado = self.executar_corpo_funcao(&funcao.bloco, pos);
+        let resultado = self.executar_corpo_funcao(&funcao.bloco);
 
         let _ = self.locais.pop();
         self.profundidade_funcoes = self.profundidade_funcoes.saturating_sub(1);
@@ -2333,6 +2474,7 @@ impl Runtime {
         if valor.tipo() != funcao.retorno {
             return Err(NeoErro::Runtime {
                 pos,
+                codigo: "NEO3008",
                 mensagem: format!(
                     "A função '{}' declarou retorno '{}' mas produziu '{}'.",
                     nome,
@@ -2344,7 +2486,7 @@ impl Runtime {
         Ok(valor)
     }
 
-    fn executar_corpo_funcao(&mut self, bloco: &[Instrucao], pos: Posicao) -> Result<NeoValor, NeoErro> {
+    fn executar_corpo_funcao(&mut self, bloco: &[Instrucao]) -> Result<NeoValor, NeoErro> {
         for instrucao in bloco {
             if let Some(valor) = self.executar_instrucao(instrucao)? {
                 return Ok(valor);
@@ -2368,6 +2510,7 @@ impl Runtime {
                         pos,
                         esperado: antigo.tipo().nome().into(),
                         recebido: novo.tipo().nome().into(),
+                        codigo: "NEO2002",
                         contexto: "A atribuição simples não faz conversão implícita.".into(),
                     });
                 }
@@ -2379,23 +2522,32 @@ impl Runtime {
                     .map(NeoValor::Decimal)
                     .ok_or_else(|| NeoErro::Runtime {
                         pos,
+                        codigo: "NEO3003",
                         mensagem: "Overflow aritmético em '+='.".into(),
                     }),
-                (NeoValor::String(a), NeoValor::String(b)) => Ok(NeoValor::String(format!("{}{}", a, b))),
+                (NeoValor::String(a), NeoValor::String(b)) => {
+                    Ok(NeoValor::String(format!("{}{}", a, b)))
+                }
                 (a, b) => Err(NeoErro::Tipo {
                     pos,
                     esperado: "decimal + decimal ou string + string".into(),
                     recebido: format!("{} e {}", a.tipo().nome(), b.tipo().nome()),
+                    codigo: "NEO2001",
                     contexto: "'+=' exige tipos compatíveis.".into(),
                 }),
             },
-            OperadorAtribuicao::Menos => self.operacao_decimal_valores(antigo, novo, pos, |a, b| a.checked_sub(b), "-="),
-            OperadorAtribuicao::Multiplica => self.operacao_decimal_valores(antigo, novo, pos, |a, b| a.checked_mul(b), "*="),
+            OperadorAtribuicao::Menos => {
+                self.operacao_decimal_valores(antigo, novo, pos, |a, b| a.checked_sub(b), "-=")
+            }
+            OperadorAtribuicao::Multiplica => {
+                self.operacao_decimal_valores(antigo, novo, pos, |a, b| a.checked_mul(b), "*=")
+            }
             OperadorAtribuicao::Divide => match (antigo, novo) {
                 (NeoValor::Decimal(a), NeoValor::Decimal(b)) => {
                     if b.is_zero() {
                         Err(NeoErro::Runtime {
                             pos,
+                            codigo: "NEO3001",
                             mensagem: "Divisão por zero em '/=' não é permitida.".into(),
                         })
                     } else {
@@ -2403,6 +2555,7 @@ impl Runtime {
                             .map(NeoValor::Decimal)
                             .ok_or_else(|| NeoErro::Runtime {
                                 pos,
+                                codigo: "NEO3003",
                                 mensagem: "Overflow aritmético em '/='.".into(),
                             })
                     }
@@ -2411,6 +2564,7 @@ impl Runtime {
                     pos,
                     esperado: "decimal /= decimal".into(),
                     recebido: format!("{} e {}", a.tipo().nome(), b.tipo().nome()),
+                    codigo: "NEO2001",
                     contexto: "'/=' exige decimal.".into(),
                 }),
             },
@@ -2419,6 +2573,7 @@ impl Runtime {
                     if b.is_zero() {
                         Err(NeoErro::Runtime {
                             pos,
+                            codigo: "NEO3002",
                             mensagem: "Módulo por zero em '%=' não é permitido.".into(),
                         })
                     } else {
@@ -2426,6 +2581,7 @@ impl Runtime {
                             .map(NeoValor::Decimal)
                             .ok_or_else(|| NeoErro::Runtime {
                                 pos,
+                                codigo: "NEO3003",
                                 mensagem: "Overflow aritmético em '%='.".into(),
                             })
                     }
@@ -2434,6 +2590,7 @@ impl Runtime {
                     pos,
                     esperado: "decimal %= decimal".into(),
                     recebido: format!("{} e {}", a.tipo().nome(), b.tipo().nome()),
+                    codigo: "NEO2001",
                     contexto: "'%=' exige decimal.".into(),
                 }),
             },
@@ -2456,6 +2613,7 @@ impl Runtime {
                 Some(resultado) => Ok(NeoValor::Decimal(resultado)),
                 None => Err(NeoErro::Runtime {
                     pos,
+                    codigo: "NEO3003",
                     mensagem: format!("Overflow aritmético em '{}'.", nome),
                 }),
             },
@@ -2463,6 +2621,7 @@ impl Runtime {
                 pos,
                 esperado: format!("decimal {} decimal", nome),
                 recebido: format!("{} e {}", a.tipo().nome(), b.tipo().nome()),
+                codigo: "NEO2001",
                 contexto: "A operação composta exige decimal.".into(),
             }),
         }
@@ -2479,7 +2638,12 @@ impl Runtime {
 
     fn encontrar_escopo_local(&self, nome: &str) -> Option<usize> {
         for indice in (0..self.locais.len()).rev() {
-            if self.locais.get(indice).map(|e| e.contains_key(nome)).unwrap_or(false) {
+            if self
+                .locais
+                .get(indice)
+                .map(|e| e.contains_key(nome))
+                .unwrap_or(false)
+            {
                 return Some(indice);
             }
         }
@@ -2491,58 +2655,10 @@ impl Runtime {
 // PIPELINE / MAIN
 // ================================================================
 
-fn compilar_e_executar(codigo: &str) -> Result<(), NeoErro> {
-    let tokens = lex(codigo)?;
-    let mut parser = Parser::novo(tokens);
-    let programa = parser.analisar()?;
-
-    let mut semantico = AnalisadorSemantico::novo();
-    semantico.analisar(&programa)?;
-
-    let mut runtime = Runtime::novo();
-    runtime.executar(&programa)?;
-    Ok(())
-}
-
-fn executar_arquivo(caminho: &str) -> Result<(), NeoErro> {
-    let codigo = fs::read_to_string(caminho).map_err(|erro| NeoErro::Runtime {
-        pos: Posicao::nova(1, 1),
-        mensagem: format!("Não foi possível abrir '{}': {}", caminho, erro),
-    })?;
-
-    println!("NeoCOBOL 0.5.1.1");
-    println!("Compilando: {}", caminho);
-
-    let tokens = lex(&codigo)?;
-    println!("Lexer: {} tokens.", tokens.len());
-
-    let mut parser = Parser::novo(tokens);
-    let programa = parser.analisar()?;
-    println!("Parser: AST construída.");
-
-    let mut semantico = AnalisadorSemantico::novo();
-    semantico.analisar(&programa)?;
-    println!("Semântica: programa válido.");
-
-    let mut runtime = Runtime::novo();
-    runtime.executar(&programa)?;
-    println!("\nPrograma executado com sucesso.");
-    Ok(())
-}
-
 fn main() {
-    let argumentos: Vec<String> = env::args().collect();
-
-    if argumentos.len() < 2 {
-        println!("NeoCOBOL 0.5.1.1");
-        println!("Uso:");
-        println!("  cargo run -- programa.neo");
-        return;
-    }
-
-    if let Err(erro) = executar_arquivo(&argumentos[1]) {
-        eprintln!("\n{}", erro);
-        std::process::exit(1);
+    let codigo = cli::principal(env::args().collect());
+    if codigo != 0 {
+        std::process::exit(codigo);
     }
 }
 
@@ -2553,6 +2669,7 @@ fn main() {
 #[cfg(test)]
 mod testes {
     use super::*;
+    use crate::diagnostico::CodigoErro;
 
     fn analisar(codigo: &str) -> Result<(), NeoErro> {
         let tokens = lex(codigo)?;
@@ -2647,7 +2764,10 @@ end
     fn retorno_fora_de_funcao_e_rejeitado() {
         let erro = analisar("return 10").expect_err("deve falhar");
         assert_eq!(erro.codigo(), CodigoErro::Semantico);
-        assert!(erro.to_string().contains("só pode ser usado dentro de uma função"));
+        assert!(
+            erro.to_string()
+                .contains("só pode ser usado dentro de uma função")
+        );
     }
 
     #[test]
@@ -3004,6 +3124,578 @@ string s = "x {a +}"
     }
 
     #[test]
+    fn codigos_dos_erros_lexicos_e_de_sintaxe() {
+        assert_eq!(codigo_de("decimal x = 10 @ 2"), "NEO1001");
+        assert_eq!(codigo_de("display \"abc"), "NEO1002");
+        assert_eq!(codigo_de("decimal x = 1.2.3"), "NEO1003");
+        assert_eq!(codigo_de("decimal x = 1 ! 2"), "NEO1004");
+        assert_eq!(codigo_de("1 + 2"), "NEO1101");
+        assert_eq!(codigo_de("decimal x = "), "NEO1102");
+        assert_eq!(codigo_de("if true"), "NEO1103");
+        assert_eq!(codigo_de("decimal x"), "NEO1103");
+        assert_eq!(codigo_de("x 5"), "NEO1105");
+    }
+
+    #[test]
+    fn codigos_dos_erros_semanticos_e_de_tipo() {
+        assert_eq!(codigo_de("display total"), "NEO2101");
+        assert_eq!(codigo_de("decimal x = inexistente(1)"), "NEO2102");
+        assert_eq!(codigo_de("decimal x = 10\ndecimal x = 20"), "NEO2104");
+        assert_eq!(codigo_de("return 10"), "NEO2105");
+        assert_eq!(codigo_de("func a() -> decimal\ndisplay 1\nend"), "NEO2106");
+        assert_eq!(codigo_de("decimal x = 1 + \"a\""), "NEO2001");
+        assert_eq!(codigo_de("decimal x = \"a\""), "NEO2002");
+        assert_eq!(codigo_de("if 1\nend"), "NEO2003");
+        assert_eq!(
+            codigo_de("func f(a: decimal) -> decimal\nreturn a\nend\ndecimal x = f(\"1\")"),
+            "NEO2004"
+        );
+        assert_eq!(
+            codigo_de("func f() -> decimal\nreturn \"a\"\nend"),
+            "NEO2005"
+        );
+        assert_eq!(codigo_de("decimal x = 1 / 0"), "NEO3001");
+        assert_eq!(codigo_de("decimal x = 1 % 0"), "NEO3002");
+    }
+
+    #[test]
+    fn diagnostico_mostra_arquivo_trecho_e_indicador() {
+        let fonte = "decimal a = 1\ndisplay total";
+        let erro = analisar(fonte).expect_err("deve falhar");
+        let texto = crate::diagnostico::formatar(&erro, "exemplo.neo", fonte);
+        assert!(texto.contains("erro[NEO2101]"));
+        assert!(texto.contains("exemplo.neo:2:9"));
+        assert!(texto.contains("2 | display total"));
+        assert!(texto.contains("^^^^^"));
+        assert!(texto.contains("ajuda:"));
+    }
+
+    #[test]
+    fn diagnostico_de_tipo_mostra_esperado_e_recebido() {
+        let fonte = "decimal x = \"a\"";
+        let erro = analisar(fonte).expect_err("deve falhar");
+        let texto = crate::diagnostico::formatar(&erro, "t.neo", fonte);
+        assert!(texto.contains("esperado: decimal"));
+        assert!(texto.contains("recebido: string"));
+    }
+
+    #[test]
+    fn diagnostico_sem_linha_correspondente_nao_causa_panic() {
+        let fonte = "if true";
+        let erro = analisar(fonte).expect_err("deve falhar");
+        let texto = crate::diagnostico::formatar(&erro, "t.neo", fonte);
+        assert!(texto.contains("erro[NEO1103]"));
+    }
+
+    #[test]
+    fn opcoes_da_linha_de_comando() {
+        let args = |v: &[&str]| -> Vec<String> { v.iter().map(|s| s.to_string()).collect() };
+        let o =
+            crate::cli::ler_opcoes(&args(&["neocobol", "check", "a.neo"])).expect("deve aceitar");
+        assert!(!o.executar);
+        assert_eq!(o.arquivo.as_deref(), Some("a.neo"));
+        let o = crate::cli::ler_opcoes(&args(&["neocobol", "--detalhes", "a.neo"]))
+            .expect("deve aceitar");
+        assert!(o.executar && o.detalhes);
+        assert!(crate::cli::ler_opcoes(&args(&["neocobol", "--xyz"])).is_err());
+    }
+
+    fn codigo_de(codigo: &str) -> String {
+        let erro = executar(codigo).expect_err("deve falhar");
+        erro.para_diagnostico().codigo.to_string()
+    }
+
+    #[test]
+    fn indicador_aponta_para_o_operador() {
+        let fonte = "decimal x = 1 + \"a\"";
+        let erro = analisar(fonte).expect_err("deve falhar");
+        let texto = crate::diagnostico::formatar(&erro, "t.neo", fonte);
+        assert!(texto.contains("t.neo:1:15"));
+        assert!(texto.contains(&format!("  | {}^\n", " ".repeat(14))));
+    }
+
+    #[test]
+    fn todo_codigo_usado_existe_na_tabela() {
+        let fontes = [include_str!("main.rs"), include_str!("cli.rs")];
+        let mut total = 0;
+        for fonte in fontes.iter() {
+            for codigo in codigos_no_texto(fonte) {
+                total += 1;
+                assert!(
+                    crate::diagnostico::TABELA
+                        .iter()
+                        .any(|e| e.codigo == codigo),
+                    "codigo fora da tabela: {}",
+                    codigo
+                );
+            }
+        }
+        assert!(total > 30, "poucos codigos encontrados: {}", total);
+    }
+
+    #[test]
+    fn codigos_da_tabela_sao_unicos() {
+        let tabela = crate::diagnostico::TABELA;
+        for (i, a) in tabela.iter().enumerate() {
+            for b in tabela.iter().skip(i + 1) {
+                assert_ne!(a.codigo, b.codigo, "codigo repetido");
+            }
+        }
+    }
+
+    #[test]
+    fn aninhamento_excessivo_gera_erro() {
+        em_thread_grande(aninhamento_corpo);
+    }
+
+    #[test]
+    fn entradas_invalidas_nao_causam_panic() {
+        em_thread_grande(entradas_invalidas_corpo);
+    }
+
+    fn em_thread_grande(corpo: fn()) {
+        let t = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(corpo)
+            .expect("nao foi possivel criar a thread");
+        t.join().expect("o teste falhou dentro da thread");
+    }
+
+    fn codigos_no_texto(texto: &str) -> Vec<String> {
+        let mut achados = Vec::new();
+        for (p, _) in texto.match_indices("\"NEO") {
+            if let (Some(codigo), Some(fecha)) = (texto.get(p + 1..p + 8), texto.get(p + 8..p + 9))
+            {
+                let digitos = codigo[3..].chars().all(|c| c.is_ascii_digit());
+                if fecha == "\"" && digitos {
+                    achados.push(codigo.to_string());
+                }
+            }
+        }
+        achados
+    }
+
+    fn aninhamento_corpo() {
+        let casos = vec![
+            format!("display {}1{}", "(".repeat(5000), ")".repeat(5000)),
+            format!("display {}true", "not ".repeat(5000)),
+            format!("display {}1", "-".repeat(5000)),
+            "if true\n".repeat(5000),
+            format!("decimal x = 1{}", " + 1".repeat(2000)),
+            format!("display {}", "1 + ".repeat(5000) + "1"),
+        ];
+        for fonte in casos {
+            let erro = analisar(&fonte).expect_err("deve falhar");
+            assert_eq!(erro.para_diagnostico().codigo, "NEO1107");
+        }
+    }
+
+    fn entradas_invalidas_corpo() {
+        let mut entradas: Vec<String> = [
+            "",
+            " ",
+            "\n\n\n",
+            "\t",
+            "\"",
+            "{",
+            "}",
+            "(",
+            ")",
+            "((((",
+            "))))",
+            "display \"{\"",
+            "display \"}\"",
+            "display \"{}\"",
+            "display \"{ }\"",
+            "display \"{(}\"",
+            "display \"{1 +}\"",
+            "display \"{{}}\"",
+            "func",
+            "func f(",
+            "func f()",
+            "func f() ->",
+            "func f() -> decimal",
+            "func f(a) -> decimal\nend",
+            "if",
+            "if true",
+            "while",
+            "end",
+            "else",
+            "return",
+            "decimal",
+            "decimal x",
+            "decimal x =",
+            "decimal 5 = 1",
+            "x =",
+            "x +=",
+            "x(",
+            "x(1",
+            "x(1,",
+            "x(,)",
+            "1 +",
+            "+",
+            "not",
+            "-",
+            "display",
+            "display (",
+            "display )",
+            "decimal x = ((1)",
+            "decimal x = 1 +* 2",
+            "decimal ç = 1",
+            "display \"😀 {1}\"",
+            "decimal x = 1 @",
+            "!",
+            "!=",
+            "==",
+            "->",
+            "decimal x = 9999999999999999999999999999999999999999",
+            "decimal x = 79228162514264337593543950335 + 1",
+            "decimal x = 79228162514264337593543950335 * 2",
+            "decimal x = 1\nx /= 0",
+            "decimal x = 1\nx %= 0",
+            "decimal x = true",
+            "boolean b = 1",
+            "string s = 1",
+            "func f() -> vazio\nreturn 1\nend",
+            "func f() -> decimal\nreturn\nend",
+            "return 1",
+            "func f() -> vazio\nfunc g() -> vazio\nend\nend",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        entradas.push("x".repeat(10_000));
+        entradas.push(format!("display {}1{}", "(".repeat(40), ")".repeat(40)));
+        entradas.push(format!("decimal x = 1{}", " + 1".repeat(2000)));
+        for entrada in entradas {
+            let texto = entrada.clone();
+            let resultado = std::panic::catch_unwind(move || {
+                if let Err(erro) = executar(&texto) {
+                    let _ = crate::diagnostico::formatar(&erro, "t.neo", &texto);
+                }
+            });
+            assert!(resultado.is_ok(), "panic com a entrada: {:?}", entrada);
+        }
+    }
+
+    #[test]
+    fn erros_carregam_inicio_e_fim() {
+        let casos: Vec<(&str, usize, usize, usize)> = vec![
+            ("display total", 1, 9, 14),
+            ("decimal x = 10 @ 2", 1, 16, 17),
+            ("display \"abc", 1, 9, 13),
+            ("decimal x = 1 + \"a\"", 1, 15, 16),
+            ("decimal x = inexistente(1)", 1, 13, 24),
+            ("decimal x = \"a\"", 1, 13, 16),
+            ("decimal x = 1.2.3", 1, 16, 17),
+            ("string s = \"ab {total}\"", 1, 17, 22),
+            ("decimal x = 1\ndecimal x = 2", 2, 9, 10),
+        ];
+        for (fonte, linha, coluna, fim) in casos {
+            let erro = analisar(fonte).expect_err("deve falhar");
+            let pos = erro.posicao();
+            assert_eq!(
+                (pos.linha, pos.coluna, pos.fim),
+                (linha, coluna, fim),
+                "fonte: {}",
+                fonte
+            );
+        }
+    }
+
+    #[test]
+    fn indicador_cobre_o_trecho_do_erro() {
+        let fonte = "decimal x = \"a\"";
+        let erro = analisar(fonte).expect_err("deve falhar");
+        let texto = crate::diagnostico::formatar(&erro, "t.neo", fonte);
+        assert!(texto.contains(&format!("  | {}^^^\n", " ".repeat(12))));
+    }
+
+    #[test]
+    fn codigos_dos_demais_erros() {
+        assert_eq!(codigo_de("func f(a: x) -> decimal\nend"), "NEO1104");
+        assert_eq!(codigo_de("display \"{1 2}\""), "NEO1106");
+        assert_eq!(codigo_de("display \"{@}\""), "NEO1106");
+        assert_eq!(
+            codigo_de("func f() -> vazio\nend\ndisplay \"{f()}\""),
+            "NEO2006"
+        );
+        assert_eq!(
+            codigo_de("func f(a: decimal) -> decimal\nreturn a\nend\ndecimal x = f()"),
+            "NEO2103"
+        );
+        assert_eq!(codigo_de("if true\nfunc f() -> vazio\nend\nend"), "NEO2107");
+        assert_eq!(
+            codigo_de("func f(x: decimal, x: string) -> vazio\nend"),
+            "NEO2104"
+        );
+        assert_eq!(
+            codigo_de("func a() -> vazio\nend\nfunc a() -> vazio\nend"),
+            "NEO2104"
+        );
+        assert_eq!(
+            codigo_de("decimal x = 79228162514264337593543950335 + 1"),
+            "NEO3003"
+        );
+    }
+
+    #[test]
+    fn codigos_de_execucao_sem_analise() {
+        assert_eq!(codigo_sem_analise("display x"), "NEO3005");
+        assert_eq!(codigo_sem_analise("display f()"), "NEO3006");
+        assert_eq!(
+            codigo_sem_analise("func f(a: decimal) -> decimal\nreturn a\nend\ndisplay f()"),
+            "NEO3007"
+        );
+        assert_eq!(
+            codigo_sem_analise("func f() -> decimal\nreturn \"a\"\nend\ndisplay f()"),
+            "NEO3008"
+        );
+    }
+
+    #[test]
+    fn codigo_do_fluxo_de_tokens_vazio() {
+        let mut parser = Parser::novo(Vec::new());
+        let erro = parser.analisar().expect_err("deve falhar");
+        assert_eq!(erro.para_diagnostico().codigo, "NEO1108");
+    }
+
+    #[test]
+    fn mensagem_de_duplicada_informa_a_linha_anterior() {
+        let erro = analisar("decimal x = 1\ndecimal x = 2").expect_err("deve falhar");
+        assert!(erro.to_string().contains("já foi declarada na linha 1"));
+        let erro =
+            analisar("func a() -> vazio\nend\nfunc a() -> vazio\nend").expect_err("deve falhar");
+        assert!(erro.to_string().contains("já foi declarada na linha 1"));
+    }
+
+    #[test]
+    fn opcoes_detalhes_e_check_em_qualquer_ordem() {
+        let args = |v: &[&str]| -> Vec<String> { v.iter().map(|s| s.to_string()).collect() };
+        let o = crate::cli::ler_opcoes(&args(&["neocobol", "--detalhes", "check", "a.neo"]))
+            .expect("deve aceitar");
+        assert!(!o.executar && o.detalhes);
+        let o = crate::cli::ler_opcoes(&args(&["neocobol", "check", "--detalhes", "a.neo"]))
+            .expect("deve aceitar");
+        assert!(!o.executar && o.detalhes);
+        assert!(crate::cli::ler_opcoes(&args(&["neocobol", "a.neo", "check"])).is_err());
+        assert!(crate::cli::ler_opcoes(&args(&["neocobol", "-x"])).is_err());
+    }
+
+    #[test]
+    fn mutacoes_dos_programas_nao_causam_panic() {
+        em_thread_grande(mutacoes_corpo);
+    }
+
+    #[test]
+    fn sopa_de_tokens_nao_causa_panic() {
+        em_thread_grande(sopa_corpo);
+    }
+
+    #[test]
+    fn cadeia_longa_permitida_executa() {
+        em_thread_grande(cadeia_permitida_corpo);
+    }
+
+    fn cadeia_permitida_corpo() {
+        let fonte = format!("decimal x = 1{}\ndisplay x", " + 1".repeat(900));
+        assert!(executar(&fonte).is_ok());
+    }
+
+    fn codigo_sem_analise(codigo: &str) -> String {
+        let tokens = lex(codigo).expect("lexer");
+        let mut parser = Parser::novo(tokens);
+        let programa = parser.analisar().expect("parser");
+        let mut runtime = Runtime::novo();
+        let erro = runtime.executar(&programa).expect_err("deve falhar");
+        erro.para_diagnostico().codigo.to_string()
+    }
+
+    fn verificar_sem_panic(texto: &str) {
+        let copia = texto.to_string();
+        let resultado = std::panic::catch_unwind(move || {
+            if let Err(erro) = analisar(&copia) {
+                let _ = crate::diagnostico::formatar(&erro, "t.neo", &copia);
+            }
+        });
+        assert!(resultado.is_ok(), "panic com a entrada: {:?}", texto);
+    }
+
+    fn mutacoes_corpo() {
+        let fontes = [
+            include_str!("../testes/basico.neo"),
+            include_str!("../testes/funcoes.neo"),
+            include_str!("../testes/escopo.neo"),
+            include_str!("../testes/interpolacao.neo"),
+            include_str!("../testes/not_e_comparacao.neo"),
+        ];
+        let trocas = ["\"", "{", "}", "(", ")", "\n", "#", "\\", "😀", "\0", " "];
+        let mut total = 0usize;
+        for fonte in fontes.iter() {
+            let chars: Vec<char> = fonte.chars().collect();
+            for i in 0..=chars.len() {
+                let cortado: String = chars[..i].iter().collect();
+                verificar_sem_panic(&cortado);
+                total += 1;
+                if i < chars.len() {
+                    let mut sem = chars.clone();
+                    sem.remove(i);
+                    verificar_sem_panic(&sem.iter().collect::<String>());
+                    total += 1;
+                    for t in trocas.iter() {
+                        let mut copia = chars.clone();
+                        copia[i] = t.chars().next().unwrap_or(' ');
+                        verificar_sem_panic(&copia.iter().collect::<String>());
+                        total += 1;
+                    }
+                }
+            }
+        }
+        assert!(total > 5000, "poucas mutacoes: {}", total);
+    }
+
+    fn sopa_corpo() {
+        let vocabulario = [
+            "decimal", "string", "boolean", "vazio", "true", "false", "display", "if", "else",
+            "end", "while", "func", "return", "and", "or", "not", "x", "y", "f", "1", "2.5",
+            "\"a\"", "\"{x}\"", "+", "-", "*", "/", "%", "=", "==", "!=", ">", "<", ">=", "<=",
+            "+=", "(", ")", ",", ":", "->", "\n", "#", "{", "}", "@", "!",
+        ];
+        let mut estado: u64 = 0x2545F4914F6CDD1D;
+        let mut proximo = move || {
+            estado ^= estado << 13;
+            estado ^= estado >> 7;
+            estado ^= estado << 17;
+            estado
+        };
+        for _ in 0..4000 {
+            let tamanho = (proximo() % 40) as usize + 1;
+            let mut fonte = String::new();
+            for _ in 0..tamanho {
+                let indice = (proximo() % vocabulario.len() as u64) as usize;
+                fonte.push_str(vocabulario[indice]);
+                fonte.push(' ');
+            }
+            verificar_sem_panic(&fonte);
+        }
+    }
+
+    #[test]
+    fn diagnosticos_completos_de_cada_codigo() {
+        em_thread_grande(diagnosticos_completos_corpo);
+    }
+
+    fn verificar_formato(erro: &NeoErro, fonte: &str, esperado: &str) {
+        let d = erro.para_diagnostico();
+        assert_eq!(d.codigo, esperado, "fonte: {}", fonte);
+        let entrada = crate::diagnostico::TABELA
+            .iter()
+            .find(|e| e.codigo == esperado)
+            .expect("codigo fora da tabela");
+        let texto = crate::diagnostico::formatar(erro, "t.neo", fonte);
+        assert!(
+            texto.contains(&format!("erro[{}]: {}", esperado, entrada.titulo)),
+            "titulo em {}",
+            esperado
+        );
+        assert!(
+            texto.contains(&format!("t.neo:{}:{}", d.pos.linha, d.pos.coluna)),
+            "posicao em {}",
+            esperado
+        );
+        assert!(texto.contains(&d.mensagem), "mensagem em {}", esperado);
+        if let Some(ajuda) = entrada.ajuda {
+            assert!(
+                texto.contains(&format!("ajuda: {}", ajuda)),
+                "ajuda em {}",
+                esperado
+            );
+        }
+        if d.pos.linha >= 1 {
+            if let Some(linha) = fonte.lines().nth(d.pos.linha - 1) {
+                assert!(texto.contains(linha), "trecho em {}", esperado);
+                assert!(texto.contains('^'), "indicador em {}", esperado);
+            }
+        }
+    }
+
+    fn erro_sem_analise(codigo: &str) -> NeoErro {
+        let tokens = lex(codigo).expect("lexer");
+        let mut parser = Parser::novo(tokens);
+        let programa = parser.analisar().expect("parser");
+        let mut runtime = Runtime::novo();
+        runtime.executar(&programa).expect_err("deve falhar")
+    }
+
+    fn diagnosticos_completos_corpo() {
+        let profundo = format!("display {}1{}", "(".repeat(300), ")".repeat(300));
+        let casos: Vec<(String, &str)> = vec![
+            ("decimal x = 10 @ 2".to_string(), "NEO1001"),
+            ("display \"abc".to_string(), "NEO1002"),
+            ("decimal x = 1.2.3".to_string(), "NEO1003"),
+            ("decimal x = 1 ! 2".to_string(), "NEO1004"),
+            ("1 + 2".to_string(), "NEO1101"),
+            ("decimal x = ".to_string(), "NEO1102"),
+            ("if true".to_string(), "NEO1103"),
+            ("func f(a: x) -> decimal\nend".to_string(), "NEO1104"),
+            ("x 5".to_string(), "NEO1105"),
+            ("display \"{1 2}\"".to_string(), "NEO1106"),
+            (profundo, "NEO1107"),
+            ("decimal x = 1 + \"a\"".to_string(), "NEO2001"),
+            ("decimal x = \"a\"".to_string(), "NEO2002"),
+            ("if 1\nend".to_string(), "NEO2003"),
+            ("func f(a: decimal) -> decimal\nreturn a\nend\ndecimal x = f(\"1\")".to_string(), "NEO2004"),
+            ("func f() -> decimal\nreturn \"a\"\nend".to_string(), "NEO2005"),
+            ("func f() -> vazio\nend\ndisplay \"{f()}\"".to_string(), "NEO2006"),
+            ("display total".to_string(), "NEO2101"),
+            ("decimal x = inexistente(1)".to_string(), "NEO2102"),
+            ("func f(a: decimal) -> decimal\nreturn a\nend\ndecimal x = f()".to_string(), "NEO2103"),
+            ("decimal x = 10\ndecimal x = 20".to_string(), "NEO2104"),
+            ("return 10".to_string(), "NEO2105"),
+            ("func a() -> decimal\ndisplay 1\nend".to_string(), "NEO2106"),
+            ("if true\nfunc f() -> vazio\nend\nend".to_string(), "NEO2107"),
+            ("decimal x = 1 / 0".to_string(), "NEO3001"),
+            ("decimal x = 1 % 0".to_string(), "NEO3002"),
+            ("decimal x = 79228162514264337593543950335 + 1".to_string(), "NEO3003"),
+            ("func loop(x: decimal) -> decimal\n    return loop(x + 1)\nend\ndecimal r = loop(0)".to_string(), "NEO3004"),
+        ];
+        let mut testados: Vec<&str> = Vec::new();
+        for (fonte, codigo) in casos {
+            let erro = executar(&fonte).expect_err("deve falhar");
+            verificar_formato(&erro, &fonte, codigo);
+            testados.push(codigo);
+        }
+        let sem_analise = vec![
+            ("display x", "NEO3005"),
+            ("display f()", "NEO3006"),
+            ("func f(a: decimal) -> decimal\nreturn a\nend\ndisplay f()", "NEO3007"),
+            ("func f() -> decimal\nreturn \"a\"\nend\ndisplay f()", "NEO3008"),
+        ];
+        for (fonte, codigo) in sem_analise {
+            let erro = erro_sem_analise(fonte);
+            verificar_formato(&erro, fonte, codigo);
+            testados.push(codigo);
+        }
+        let mut parser = Parser::novo(Vec::new());
+        let erro = parser.analisar().expect_err("deve falhar");
+        verificar_formato(&erro, "", "NEO1108");
+        testados.push("NEO1108");
+
+        // NEO3009 é testado em tests/cli.rs. NEO2108 e NEO3010 são defesas internas.
+        let internos = ["NEO2108", "NEO3009", "NEO3010"];
+        for entrada in crate::diagnostico::TABELA.iter() {
+            if internos.contains(&entrada.codigo) {
+                continue;
+            }
+            assert!(
+                testados.contains(&entrada.codigo),
+                "codigo sem teste de formato: {}",
+                entrada.codigo
+            );
+        }
+    }
+
+    #[test]
     fn escopos_de_blocos_nao_vazam() {
         let codigo = r#"
 if true
@@ -3013,9 +3705,4 @@ display interno
 "#;
         assert!(analisar(codigo).is_err());
     }
-
-}
-
-}
-
 }
