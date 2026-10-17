@@ -44,13 +44,6 @@ Este roteiro é um plano e pode mudar. Cada versão tem um foco, e as quebras de
 - Testar entradas inválidas e casos extremos.
 - Garantir que as correções não quebrem o que já funciona.
 
-## 0.6.1 - Avisos e vários erros
-
-- Avisos NEO4xxx: variável declarada e não utilizada; código inalcançável; valor calculado e descartado (a decidir, porque hoje só chamadas de função podem ser instruções).
-- Vários diagnósticos de uma vez, começando pela análise semântica e depois pelo parser.
-- Resumo dos erros encontrados.
-- Saída estruturada em JSON, preparando a integração com ferramentas de IDE.
-- Sugestões do tipo "você quis dizer...?" para nomes parecidos.
 
 
 
