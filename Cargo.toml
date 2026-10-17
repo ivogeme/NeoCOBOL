@@ -1,6 +1,6 @@
 [package]
-name = "NeoCOBOL"
-version = "0.5.1"
+name = "neocobol"
+version = "0.6.0"
 edition = "2024"
 
 [dependencies]

@@ -2,7 +2,7 @@
 
 Uma linguagem de programação experimental, inspirada na clareza do COBOL, feita do zero em Rust.
 
-**Versão atual: 0.5.1.1.** Esta versão corrige falhas da 0.5.1 e **quebra compatibilidade** com ela. Veja o [CHANGELOG](CHANGELOG.md).
+****Versão atual: 0.6.0.** Esta versão muda a saída do programa e os códigos de erro e **quebra compatibilidade** com a 0.5.1.1. Veja o (CHANGELOG.md).
 
 ## O que é
 
@@ -35,6 +35,18 @@ E execute:
 ~~~
 cargo run -- ola.neo
 ~~~
+
+### Comandos
+
+~~~
+neocobol programa.neo               executa o programa
+neocobol check programa.neo         verifica o programa sem executar
+neocobol --detalhes programa.neo    mostra também as etapas (Lexer, Parser, Semântica)
+neocobol --versao
+neocobol --ajuda
+~~~
+
+Por padrão o programa mostra só o resultado ou o erro. Com o Cargo, use `cargo run -- check programa.neo`. Depois de `cargo build --release`, o executável fica em `target/release/neocobol`. O código de saída é 0 (sucesso), 1 (erro no programa) ou 2 (opção inválida).
 
 O programa mostra algumas linhas de diagnóstico (Lexer, Parser, Semântica) antes do resultado.
 
@@ -115,19 +127,19 @@ display "Ela disse \"oi\""
 
 ### Erros
 
-Cada erro informa código, posição e mensagem:
+Cada erro tem um código estável, o arquivo, a linha e a coluna, o trecho do código com um indicador e uma ajuda:
 
 ~~~
-NEO2002 - Erro semântico na linha 1, coluna 9: A variável 'total' não foi declarada. Declare-a antes de usá-la. ...
+erro[NEO2101]: Variável não declarada
+ --> erro1.neo:2:9
+  |
+2 | display total
+  |         ^^^^^
+  = A variável 'total' não foi declarada. Declare-a antes de usá-la. ...
+  = ajuda: Declare a variável antes de usá-la, por exemplo: decimal nome = 0
 ~~~
 
-| Código | Tipo |
-| --- | --- |
-| NEO1001 | Erro léxico |
-| NEO1002 | Erro de sintaxe |
-| NEO2001 | Erro de tipo |
-| NEO2002 | Erro semântico |
-| NEO3001 | Erro de execução |
+Os erros vão para a saída de erros. A tabela completa está em [ERROS.md](ERROS.md). As famílias são NEO1xxx (léxico e sintaxe), NEO2xxx (semântica e tipos), NEO3xxx (execução) e NEO4xxx (avisos, planejados).
 
 ## Arquitetura
 
@@ -143,31 +155,34 @@ Análise semântica
 Runtime → Execução
 ~~~
 
-## Testes
+#### Testes
 
-- `cargo test` roda 42 testes unitários (lexer, parser, semântica e runtime).
-- Os programas `.neo` do repositório (`teste.neo`, `teste3.neo`, `teste5.neo`, `teste_completo_0.5.1.neo`, `megatest_0.5.1.neo` e `MEGATEST_FINAL_0.5.1.neo`) exercitam os recursos da linguagem. Rode-os e confira a saída.
+- `cargo test` roda mais de 75 testes: os unitários (código, posição e formato de cada erro, entradas inválidas, escopo e interpolação), os da linha de comando (`tests/cli.rs`) e o dos programas completos (`tests/exemplos.rs`).
+- A pasta `testes/` tem programas `.neo`. Para cada `nome.neo`, o arquivo `nome.saida` guarda a saída esperada e `nome.erro` guarda os erros esperados. Os programas que começam com `erro_` devem terminar com código de saída 1.
+- Para rodar um programa à mão: `cargo run -- testes/basico.neo`.
 
-## Mudanças da 0.5.1.1 (quebram compatibilidade)
 
-- Funções não enxergam mais variáveis locais de quem as chamou.
-- `not` vale sobre a comparação inteira.
-- Variável global usada antes de ser declarada agora é erro.
-- `\"`, `\\`, `\n` e `\t` em textos passam a ter significado.
-- A interpolação é calculada ao criar o texto, e não no `display`.
 
-Detalhes no [CHANGELOG](CHANGELOG.md).
 
-## Limitações atuais
 
-- Não há biblioteca padrão, arrays nem registros.
-- Não há entrada de dados pelo teclado nem leitura de arquivos.
-- Só existe um tipo numérico (`decimal`).
-- Só existe a repetição `while`, e não há `else if`.
-- Não há módulos nem compilação para código nativo.
-- Não existe forma de escrever um `{x}` literal em um texto.
-- O programa sempre mostra linhas de diagnóstico antes do resultado.
-- O projeto ainda não tem a estabilidade de uma linguagem de produção.
+
+## Mudanças da 0.6.0 (quebram compatibilidade)
+
+- A saída é limpa por padrão. `--detalhes` mostra as etapas.
+- Cada tipo de erro tem um código novo, com significado diferente dos códigos antigos (veja [ERROS.md](ERROS.md)).
+- O formato do erro mudou: agora mostra o trecho do código e um indicador.
+- Programas muito aninhados ou com instruções enormes geram o erro NEO1107.
+- O executável se chama `neocobol`.
+
+
+
+
+
+Detalhes no (CHANGELOG.md).
+
+## - Só o primeiro erro de cada programa é mostrado.
+- Ainda não há avisos nem saída em JSON.
+- Uma instrução pode ter no máximo 1000 operadores, cerca de 50 níveis de parênteses e cerca de 150 blocos aninhados.
 
 ## Próximos objetivos
 
@@ -201,6 +216,10 @@ O NeoCOBOL nasceu de uma observação: a ideia por trás do COBOL era muito boa,
 > Uma linguagem não precisa ser enorme para ser útil.
 
 O projeto é experimental. As versões 0.x podem quebrar compatibilidade, e cada quebra é registrada no [CHANGELOG](CHANGELOG.md).
+
+## Licença
+
+NeoCOBOL é distribuído sob a licença Apache License 2.0. Consulte o arquivo [LICENSE](LICENSE).perimental. As versões 0.x podem quebrar compatibilidade, e cada quebra é registrada no [CHANGELOG](CHANGELOG.md).
 
 ## Licença
 
