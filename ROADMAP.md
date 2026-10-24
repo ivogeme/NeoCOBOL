@@ -24,26 +24,3 @@ Este roteiro é um plano e pode mudar. Cada versão tem um foco, e as quebras de
 8. Bibliotecas externas, em caráter experimental, depois que módulos e pacotes estiverem estáveis.
 9. Especificação oficial da sintaxe e da semântica, escrita aos poucos e concluída antes da versão 1.0.
 
-### 2. Ferramentas
-
-- Comando `neocobol check`, que verifica o código sem executá-lo.
-- Saída limpa por padrão: só o resultado do programa ou os erros. O resultado vai para a saída normal e os diagnósticos para a saída de erros.
-- As linhas de etapas (Lexer, Parser, Semântica) aparecem apenas com `--detalhes`.
-- O comando se chama `neocobol`, em minúsculas.
-- Entradas inválidas nunca devem causar panic em Rust.
-
-### 3. Organização do código
-
-- Primeiro passo: mover os tipos de erro e de posição para um módulo próprio.
-- Todo código novo já nasce em módulos separados. O código antigo continua em um arquivo único por enquanto.
-
-### 4. Testes
-
-- Verificar código, mensagem, arquivo, linha, coluna, trecho e sugestão de cada diagnóstico.
-- Pasta `testes/` com programas `.neo` completos e a saída esperada de cada um, comparados automaticamente (inclusive os `erro_*.neo`).
-- Testar entradas inválidas e casos extremos.
-- Garantir que as correções não quebrem o que já funciona.
-
-
-
-
